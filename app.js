@@ -17,6 +17,100 @@ function normalizeBrawlerName(name) {
         .replace(/[^A-Z0-9]/g, ''); // strip ALL non-alphanumeric
 }
 
+/** Brawlify CDN portrait when BrawlAPI has not listed the brawler yet (e.g. Sirius). */
+function brawlifyBrawlerIconUrl(id, variant = 'borderless') {
+    const numId = Number(id);
+    if (!Number.isFinite(numId) || numId <= 0) return '';
+    return `https://cdn.brawlify.com/brawlers/${variant}/${numId}.png`;
+}
+
+/** BrawlAPI icon when available, otherwise Supercell brawler id on Brawlify. */
+function resolveBrawlerIconUrl(playerBrawlerOrId, globalBrawler) {
+    if (globalBrawler) {
+        return globalBrawler.imageUrl2 || globalBrawler.imageUrl || '';
+    }
+    const id = typeof playerBrawlerOrId === 'object' ? playerBrawlerOrId?.id : playerBrawlerOrId;
+    return brawlifyBrawlerIconUrl(id);
+}
+
+/** Canonical `#TAG` form for comparing Supercell player tags. */
+function normalizePlayerTag(tag) {
+    if (!tag) return '';
+    let t = String(tag).trim().toUpperCase();
+    if (!t) return '';
+    t = t.replace(/^#+/, '');
+    return t ? `#${t}` : '';
+}
+
+function tagsEqual(a, b) {
+    return normalizePlayerTag(a) === normalizePlayerTag(b);
+}
+
+function normalizeMapName(name) {
+    return (name || '').toLowerCase().replace(/[\s\-\.]+/g, ' ').trim();
+}
+
+function isMapInRankedPool(mapName) {
+    const norm = normalizeMapName(mapName);
+    return RANKED_POOL.some(rp => normalizeMapName(rp) === norm);
+}
+
+/** Supercell battle.type — `ranked` is competitive ranked, not Trophy Road (see API BattleType). */
+function isBattleRanked(battle) {
+    if (!battle) return false;
+    const battleType = (battle.type || '').toLowerCase();
+    if (battleType === 'soloranked' || battleType === 'teamranked' || battleType === 'ranked' || battleType === 'competitive') {
+        return true;
+    }
+    if (['friendly', 'practice', 'tournament', 'challenge'].includes(battleType)) {
+        return false;
+    }
+    // Trophy Road / ladder: trophy delta without a ranked battle type
+    if (battle.trophyChange != null && battleType !== 'ranked') {
+        return false;
+    }
+    return false;
+}
+
+const MATCH_LIST_PAGE_SIZE = 50;
+/** Ranked log never renders more than this many rows (keeps the list fast). */
+const RANKED_LOG_MAX_MATCHES = 50;
+let matchListVisibleCount = MATCH_LIST_PAGE_SIZE;
+let matchIdIndex = new Map();
+
+function rebuildMatchIdIndex() {
+    matchIdIndex.clear();
+    matches.forEach((m, i) => matchIdIndex.set(String(m.id), i));
+}
+
+/** One-time fix for matches mis-tagged before `ranked` battle type was recognized. */
+function migrateLegacyRankedFlags() {
+    let changed = 0;
+    if (!localStorage.getItem('brawl_ranked_type_fix_v1')) {
+        matches.forEach(m => {
+            if (m.source !== 'api' || m.isRanked !== false) return;
+            const bt = String(m.battleType || '').toLowerCase();
+            if (bt === 'ranked' || bt === 'soloranked' || bt === 'teamranked' || bt === 'competitive') {
+                m.isRanked = true;
+                changed++;
+            }
+        });
+        localStorage.setItem('brawl_ranked_type_fix_v1', '1');
+    }
+    if (!localStorage.getItem('brawl_ranked_type_fix_v2')) {
+        matches.forEach(m => {
+            if (m.source !== 'api' || m.isRanked !== false || m.battleType) return;
+            m.isRanked = true;
+            changed++;
+        });
+        localStorage.setItem('brawl_ranked_type_fix_v2', '1');
+    }
+    if (changed > 0) {
+        rebuildMatchIdIndex();
+        localStorage.setItem('brawl_matches', JSON.stringify(matches));
+    }
+}
+
 /** Enemy brawler names from battlelog (all opposing teams / other showdown players). */
 function extractOpponentBrawlersFromBattle(item, userTag) {
     const names = [];
@@ -30,7 +124,7 @@ function extractOpponentBrawlersFromBattle(item, userTag) {
         for (let i = 0; i < b.teams.length; i++) {
             const team = b.teams[i];
             if (!Array.isArray(team)) continue;
-            if (team.some(p => p && p.tag === userTag)) {
+            if (team.some(p => p && tagsEqual(p.tag, userTag))) {
                 myTeamIdx = i;
                 break;
             }
@@ -45,7 +139,7 @@ function extractOpponentBrawlersFromBattle(item, userTag) {
         }
     } else if (Array.isArray(b.players)) {
         for (const p of b.players) {
-            if (p && p.tag !== userTag && p.brawler && p.brawler.name) add(p.brawler.name);
+            if (p && !tagsEqual(p.tag, userTag) && p.brawler && p.brawler.name) add(p.brawler.name);
         }
     }
     return [...new Set(names)];
@@ -61,11 +155,18 @@ function brawlerDisplayFromKey(key) {
     if (key.startsWith('id:')) {
         const id = Number(key.slice(3));
         const gb = brawlers.find(x => Number(x.id) === id);
-        return { name: gb ? gb.name : `Brawler ${id}`, icon: gb ? (gb.imageUrl || gb.imageUrl2 || '') : '' };
+        return {
+            name: gb ? gb.name : `Brawler ${id}`,
+            icon: gb ? (gb.imageUrl || gb.imageUrl2 || '') : brawlifyBrawlerIconUrl(id)
+        };
     }
     const norm = key.slice(2);
     const gb = brawlers.find(x => normalizeBrawlerName(x.name) === norm);
-    return { name: gb ? gb.name : norm, icon: gb ? (gb.imageUrl || gb.imageUrl2 || '') : '' };
+    const displayName = gb ? gb.name : norm;
+    const icon = gb
+        ? (gb.imageUrl || gb.imageUrl2 || '')
+        : `https://media.brawltime.ninja/brawlers/${displayName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}/avatar.png`;
+    return { name: displayName, icon };
 }
 
 const MIN_MATCHUP_GAMES = 2;
@@ -196,6 +297,7 @@ function keyIpWhitelistHint(message) {
 }
 
 const OFFICIAL_API_FETCH_MS = 30000;
+const BRAWL_API_FETCH_MS = 6000;
 
 // Official Supercell API — always via same-origin or configured proxy (server forwards Authorization).
 async function smartBrawlFetch(endpoint) {
@@ -234,16 +336,28 @@ async function fetchBrawlApiJson(path) {
         if (tried.has(base)) continue;
         tried.add(base);
         try {
-            const res = await fetch(`${base}/api${path}`, { cache: 'no-store' });
-            const ct = res.headers.get('content-type') || '';
-            if (res.ok && ct.includes('application/json')) {
-                return await res.json();
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), BRAWL_API_FETCH_MS);
+            try {
+                const res = await fetch(`${base}/api${path}`, { cache: 'no-store', signal: ctrl.signal });
+                const ct = res.headers.get('content-type') || '';
+                if (res.ok && ct.includes('application/json')) {
+                    return await res.json();
+                }
+            } finally {
+                clearTimeout(timer);
             }
         } catch (_) { /* try next */ }
     }
-    const res = await fetch(`https://api.brawlapi.com/v1${path}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`BrawlAPI ${path} HTTP ${res.status}`);
-    return await res.json();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), BRAWL_API_FETCH_MS);
+    try {
+        const res = await fetch(`https://api.brawlapi.com/v1${path}`, { cache: 'no-store', signal: ctrl.signal });
+        if (!res.ok) throw new Error(`BrawlAPI ${path} HTTP ${res.status}`);
+        return await res.json();
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 function strategyStorageKey(mapKey) {
@@ -768,6 +882,8 @@ const strategyCanvas = document.getElementById('strategy-canvas');
 
 // Initialization
 async function init() {
+    rebuildMatchIdIndex();
+    migrateLegacyRankedFlags();
     updateProfileCard();
     renderMatches();
     updateDashboard();
@@ -778,10 +894,8 @@ async function init() {
     if (apiProxyInput) apiProxyInput.value = localStorage.getItem('brawl_proxy_origin') || '';
     
     setupDropdowns();
-    await fetchGameData();
-    
-    // Initial purge of non-rotation matches
-    purgeNonRotationMatches();
+    initGuideStrategy();
+    fetchGameData();
     const savedCollection = JSON.parse(localStorage.getItem('brawl_collection_data')) || [];
     if (savedCollection.length > 0) renderCollection(savedCollection);
     
@@ -981,6 +1095,10 @@ navLinks.forEach(link => {
         if (targetView === 'strategies') {
             strategyResizeCanvas();
             strategyLoad();
+        }
+        if (targetView === 'guide') {
+            initGuideStrategy();
+            renderGuideView();
         }
     });
 });
@@ -1225,49 +1343,84 @@ function renderAnalyticsMapOptions(list) {
     });
 }
 
+let brawlersFetchPromise = null;
+
+/** Single in-flight brawler list fetch shared by match form, collection, and guide. */
+async function fetchBrawlersOnce() {
+    if (brawlers.length) return true;
+    if (!brawlersFetchPromise) {
+        brawlersFetchPromise = (async () => {
+            try {
+                const brawlersData = await fetchBrawlApiJson('/brawlers');
+                brawlers = brawlersData.list.sort((a, b) => a.name.localeCompare(b.name));
+                if (brawlerSearch) {
+                    brawlerSearch.placeholder = 'Select a Brawler...';
+                    brawlerSearch.disabled = false;
+                }
+                renderBrawlerOptions(brawlers);
+                if (isGuideViewActive() && guideActiveTab === 'tierlists') {
+                    renderGuideBrawlerPool();
+                }
+                return true;
+            } catch (err) {
+                brawlersFetchPromise = null;
+                console.warn('[Brawlers] fetch failed:', err);
+                return false;
+            }
+        })();
+    }
+    return brawlersFetchPromise;
+}
+
 // Fetch Data from BrawlAPI
 async function fetchGameData() {
-    try {
-        const brawlersData = await fetchBrawlApiJson('/brawlers');
-        brawlers = brawlersData.list.sort((a, b) => a.name.localeCompare(b.name));
-        
-        brawlerSearch.placeholder = "Select a Brawler...";
-        brawlerSearch.disabled = false;
-        renderBrawlerOptions(brawlers);
+    const [brawlersOk, mapsResult] = await Promise.all([
+        fetchBrawlersOnce(),
+        fetchBrawlApiJson('/maps').then(data => ({ ok: true, data })).catch(err => ({ ok: false, err }))
+    ]);
 
-        const mapsData = await fetchBrawlApiJson('/maps');
-        
-        // Deduplicate maps by their sanitized name
+    if (mapsResult.ok) {
         const uniqueMaps = [];
         const seenNames = new Set();
-        mapsData.list.forEach(m => {
+        mapsResult.data.list.forEach(m => {
             const normalizedName = m.name.replace(/-/g, ' ').toLowerCase();
             if (!seenNames.has(normalizedName)) {
                 seenNames.add(normalizedName);
                 uniqueMaps.push(m);
             }
         });
-        
-        // Filter out specific maps listed in the ranked pool memory
+
         rankedMaps = uniqueMaps.filter(m => {
             const normalizedName = m.name.replace(/-/g, ' ').toLowerCase();
             return RANKED_POOL.some(rankedName => rankedName.replace(/-/g, ' ').toLowerCase() === normalizedName);
         });
-        
-        modeSearch.placeholder = "Select Ranked Map & Mode...";
-        modeSearch.disabled = false;
+
+        if (modeSearch) {
+            modeSearch.placeholder = 'Select Ranked Map & Mode...';
+            modeSearch.disabled = false;
+        }
         renderModeOptions(rankedMaps);
         populateStrategyMaps();
+    } else {
+        console.error('Error fetching maps:', mapsResult.err);
+    }
 
-    } catch (error) {
-        console.error("Error fetching BrawlAPI data:", error);
-        if (window.location.protocol === 'file:' || error.name === 'TypeError') {
-            brawlerSearch.placeholder = "⚠️ Proxy missing. Live mode selection disabled.";
-            modeSearch.placeholder = "⚠️ Run Launch.bat to enable map selection.";
-        } else {
-            brawlerSearch.placeholder = "Error loading brawlers.";
-            modeSearch.placeholder = "Error loading maps.";
+    if (!brawlersOk && !brawlers.length) {
+        const offline = window.location.protocol === 'file:' || mapsResult.err?.name === 'TypeError';
+        if (brawlerSearch) {
+            brawlerSearch.placeholder = offline
+                ? '⚠️ Proxy missing. Live mode selection disabled.'
+                : 'Error loading brawlers.';
         }
+        if (modeSearch && !mapsResult.ok) {
+            modeSearch.placeholder = offline
+                ? '⚠️ Run Launch.bat to enable map selection.'
+                : 'Error loading maps.';
+        }
+    }
+
+    if (isGuideViewActive() && guideActiveTab === 'tierlists') {
+        renderGuideBrawlerPool();
     }
 }
 
@@ -1285,7 +1438,7 @@ linkAccountForm.addEventListener('submit', (e) => {
 
     userProfile = {
         username,
-        tag,
+        tag: normalizePlayerTag(tag),
         icon: "https://cdn.brawlify.com/profile-icons/regular/28000000.png" // Default generic icon until API hooked
     };
     
@@ -1492,6 +1645,7 @@ window.switchMatchTab = function(tabName) {
     const targetTab = document.querySelector(`#matches .sub-tab[data-tab="${tabName}"]`);
     if (targetTab) targetTab.classList.add('active');
     activeMatchTab = tabName;
+    matchListVisibleCount = MATCH_LIST_PAGE_SIZE;
     renderMatches();
 };
 
@@ -1515,6 +1669,8 @@ window.switchAnalyticsTab = function(tabName) {
 clearAllBtn.addEventListener('click', () => {
     if (confirm("Are you sure you want to delete all match history?")) {
         matches = [];
+        matchListVisibleCount = MATCH_LIST_PAGE_SIZE;
+        rebuildMatchIdIndex();
         localStorage.setItem('brawl_matches', JSON.stringify(matches));
         renderMatches();
         updateDashboard();
@@ -1546,9 +1702,10 @@ function compareMatchesNewestFirst(a, b) {
 // Render Match History List
 function renderMatches() {
     const listContainer = document.getElementById('matches-list-container');
+    if (!listContainer) return;
 
-    // API sync uses unshift in battlelog order (newest-first from API becomes reversed in the array).
     matches.sort(compareMatchesNewestFirst);
+    rebuildMatchIdIndex();
     
     // Filter matches based on the active tab
     const filteredMatches = matches.filter(m => {
@@ -1559,15 +1716,22 @@ function renderMatches() {
         }
     });
 
+    let loadMoreBtn = document.getElementById('load-more-matches-btn');
+
     if (filteredMatches.length === 0) {
         listContainer.innerHTML = `<div class="empty-state">No ${activeMatchTab} matches recorded yet.</div>`;
-        localStorage.setItem('brawl_matches', JSON.stringify(matches));
+        if (loadMoreBtn) loadMoreBtn.style.display = 'none';
         return;
     }
 
     listContainer.innerHTML = '';
-    
-    filteredMatches.forEach((match, index) => {
+
+    const displayLimit = activeMatchTab === 'ranked'
+        ? RANKED_LOG_MAX_MATCHES
+        : matchListVisibleCount;
+    const visibleMatches = filteredMatches.slice(0, displayLimit);
+
+    visibleMatches.forEach((match) => {
         const item = document.createElement('div');
         item.className = 'match-item';
         
@@ -1597,11 +1761,40 @@ function renderMatches() {
         listContainer.appendChild(item);
     });
 
-    localStorage.setItem('brawl_matches', JSON.stringify(matches));
+    if (activeMatchTab === 'ranked' && filteredMatches.length > RANKED_LOG_MAX_MATCHES) {
+        const note = document.createElement('p');
+        note.className = 'empty-state';
+        note.style.cssText = 'margin-top:0.75rem;font-size:0.85rem;opacity:0.75;';
+        note.textContent = `Showing your ${RANKED_LOG_MAX_MATCHES} most recent ranked battles (${filteredMatches.length} stored).`;
+        listContainer.appendChild(note);
+    }
+
+    if (!loadMoreBtn) {
+        loadMoreBtn = document.createElement('button');
+        loadMoreBtn.id = 'load-more-matches-btn';
+        loadMoreBtn.type = 'button';
+        loadMoreBtn.className = 'primary-btn';
+        loadMoreBtn.style.cssText = 'display:none;width:100%;margin-top:1rem;padding:0.75rem;font-size:0.9rem;';
+        loadMoreBtn.addEventListener('click', () => {
+            matchListVisibleCount += MATCH_LIST_PAGE_SIZE;
+            renderMatches();
+        });
+        listContainer.parentNode.insertBefore(loadMoreBtn, listContainer.nextSibling);
+    }
+
+    if (activeMatchTab !== 'ranked' && filteredMatches.length > matchListVisibleCount) {
+        const remaining = filteredMatches.length - matchListVisibleCount;
+        loadMoreBtn.textContent = `Load more (${remaining} older)`;
+        loadMoreBtn.style.display = 'block';
+    } else {
+        loadMoreBtn.style.display = 'none';
+    }
+
 }
 
 function deleteMatch(id) {
     matches = matches.filter(m => m.id !== id);
+    rebuildMatchIdIndex();
     localStorage.setItem('brawl_matches', JSON.stringify(matches));
     renderMatches();
     updateDashboard();
@@ -1612,22 +1805,21 @@ function deleteMatch(id) {
  * @param {boolean} silent If true, skips re-rendering (useful during sync)
  * @returns {number} The number of purged items
  */
+/** Optional cleanup when saving a new map pool (does not run on auto-sync). */
 function purgeNonRotationMatches(silent = false) {
     if (!matches || matches.length === 0) return 0;
     
     const beforeCount = matches.length;
-    const rankedPoolLower = RANKED_POOL.map(rp => rp.toLowerCase().replace(/[\s\-\.]+/g, ' '));
     
     matches = matches.filter(m => {
-        // Preserve all Trophy matches permanently. We only purge out-of-rotation Ranked games.
         if (m.isRanked === false) return true;
-        
-        const normalizedMatchMap = (m.mapName || '').toLowerCase().replace(/[\s\-\.]+/g, ' ');
-        return rankedPoolLower.includes(normalizedMatchMap);
+        if (m.source === 'api') return true;
+        return isMapInRankedPool(m.mapName);
     });
     
     const purged = beforeCount - matches.length;
     if (purged > 0) {
+        rebuildMatchIdIndex();
         localStorage.setItem('brawl_matches', JSON.stringify(matches));
         if (!silent) {
             renderMatches();
@@ -1665,11 +1857,7 @@ async function syncBattlelog() {
         syncStatus.style.color = "var(--color-win)";
     }
     
-    // --- Auto-purge non-ranked matches ---
-    const purged = purgeNonRotationMatches(true); // silent mode for sync
-    if (purged > 0) {
-        console.log(`[Sync] Purged ${purged} historical non-ranked matches`);
-    }
+    rebuildMatchIdIndex();
     
     try {
         let items = [];
@@ -1753,14 +1941,12 @@ async function syncBattlelog() {
                 return;
             }
             
-            // Categorize match type — Ranked vs Trophy
             const battleType = (item.battle.type || '').toLowerCase();
-            // The API uses "ranked" for standard Trophy ladder matches. 
-            // True competitive mode is "soloranked" or "teamranked" or "competitive".
-            const isRanked = battleType === 'soloranked' || battleType === 'teamranked' || battleType === 'competitive';
+            const isRanked = isBattleRanked(item.battle);
             
             // Find User's Brawler in the teams data
             let myBrawlerName = "";
+            let myBrawlerId = 0;
             let foundPlayer = false;
             
             // Handle team-based modes (never use team array index as "rank" — it is not win/loss.)
@@ -1768,8 +1954,9 @@ async function syncBattlelog() {
                 for (let i = 0; i < item.battle.teams.length; i++) {
                     let team = item.battle.teams[i];
                     for (let p of team) {
-                        if (p.tag === userProfile.tag) {
+                        if (tagsEqual(p.tag, userProfile.tag)) {
                             myBrawlerName = p.brawler.name.toUpperCase();
+                            myBrawlerId = p.brawler.id || 0;
                             foundPlayer = true;
                             break;
                         }
@@ -1782,8 +1969,9 @@ async function syncBattlelog() {
             if (!foundPlayer && item.battle.players) {
                 for (let i = 0; i < item.battle.players.length; i++) {
                     let p = item.battle.players[i];
-                    if (p.tag === userProfile.tag) {
+                    if (tagsEqual(p.tag, userProfile.tag)) {
                         myBrawlerName = p.brawler.name.toUpperCase();
+                        myBrawlerId = p.brawler.id || 0;
                         foundPlayer = true;
                         break;
                     }
@@ -1854,25 +2042,29 @@ async function syncBattlelog() {
             const newMatch = {
                 id: item.battleTime,
                 source: 'api',  // Tag as API-synced so it never gets purged
-                brawlerId: mappedBrawler ? mappedBrawler.id : 0,
+                brawlerId: mappedBrawler ? mappedBrawler.id : myBrawlerId,
                 brawlerName: mappedBrawler ? mappedBrawler.name : myBrawlerName,
-                brawlerIcon: mappedBrawler ? mappedBrawler.imageUrl : '',
+                brawlerIcon: mappedBrawler ? mappedBrawler.imageUrl : resolveBrawlerIconUrl(myBrawlerId),
                 modeName: mappedMap?.gameMode?.name || item.battle.mode || item.event.mode || 'Ranked',
                 mapName: item.event.map || 'Unknown Map',
                 modeIcon: mappedMap?.gameMode?.imageUrl || '',
                 result,
-                isRanked: isRanked,
+                isRanked,
+                battleType,
                 date: battleDate,
                 opponentBrawlers: oppBrawlers
             };
             
-            // Duplicate & Retroactive Update Check
-            const existingIdx = matches.findIndex(m => m.id === item.battleTime);
-            if (existingIdx !== -1) {
+            const existingIdx = matchIdIndex.get(String(item.battleTime));
+            if (existingIdx !== undefined) {
                 const oldMatch = matches[existingIdx];
                 let repaired = false;
                 if (oppBrawlers.length && JSON.stringify(oldMatch.opponentBrawlers || []) !== JSON.stringify(oppBrawlers)) {
                     oldMatch.opponentBrawlers = oppBrawlers;
+                    repaired = true;
+                }
+                if (oldMatch.battleType !== battleType) {
+                    oldMatch.battleType = battleType;
                     repaired = true;
                 }
                 if (oldMatch.isRanked !== isRanked || oldMatch.result !== result) {
@@ -1882,12 +2074,19 @@ async function syncBattlelog() {
                 }
                 if (repaired) updatedCount++;
             } else {
-                matches.unshift(newMatch);
+                matches.push(newMatch);
+                matchIdIndex.set(String(item.battleTime), matches.length - 1);
                 newCount++;
             }
         });
+
+        if (newCount > 0) {
+            matches.sort(compareMatchesNewestFirst);
+            rebuildMatchIdIndex();
+        }
         
-        if (newCount > 0 || purged > 0 || updatedCount > 0) {
+        if (newCount > 0 || updatedCount > 0) {
+            rebuildMatchIdIndex();
             localStorage.setItem('brawl_matches', JSON.stringify(matches));
             renderMatches();
             updateDashboard();
@@ -1895,13 +2094,13 @@ async function syncBattlelog() {
             if (updatedCount > 0) console.log(`[Sync] Repaired ${updatedCount} existing matches`);
         }
         
-        // Update sync status display
         lastSyncTime = new Date();
         if (syncStatus) {
             const timeStr = lastSyncTime.toLocaleTimeString();
             let statusParts = [];
             if (newCount > 0) statusParts.push(`+${newCount} match${newCount > 1 ? 'es' : ''}`);
-            if (purged > 0) statusParts.push(`${purged} non-ranked removed`);
+            if (updatedCount > 0) statusParts.push(`${updatedCount} updated`);
+            statusParts.push(`${matches.length} stored`);
             syncStatus.textContent = statusParts.length > 0
                 ? `${statusParts.join(', ')} • ${timeStr}`
                 : `Up to date • ${timeStr}`;
@@ -1944,10 +2143,9 @@ function updateDashboard() {
     // Filter for only ranked matches for analytics
     const rankedMatches = matches.filter(m => m.isRanked !== false); // Assume true if missing (for legacy) but sync sets true
     const totalMatches = rankedMatches.length;
-    
-    document.getElementById('overall-match-count').textContent = `${totalMatches} Ranked Matches`;
 
     if (totalMatches === 0) {
+        document.getElementById('overall-match-count').textContent = '0 ranked matches';
         document.getElementById('overall-winrate-text').textContent = '0%';
         document.getElementById('overall-winrate-circle').style.background = `conic-gradient(var(--bg-surface) 360deg, var(--bg-surface) 0deg)`;
         
@@ -1958,13 +2156,10 @@ function updateDashboard() {
         return;
     }
 
-    // Extract Played Maps for Analytics (only maps currently in rotation)
     const uniqueMapsMap = new Map();
-    const rankedPoolLower = RANKED_POOL.map(rp => rp.toLowerCase().replace(/[\s\-\.]+/g, ' '));
     
     rankedMatches.forEach(m => {
-        const normalizedMap = (m.mapName || '').toLowerCase().replace(/[\s\-\.]+/g, ' ');
-        if (!rankedPoolLower.includes(normalizedMap)) return; // Only show maps in current rotation
+        if (!isMapInRankedPool(m.mapName)) return;
         
         const key = `${m.modeName} - ${m.mapName}`;
         if (!uniqueMapsMap.has(key)) {
@@ -1981,12 +2176,20 @@ function updateDashboard() {
     playedMaps = Array.from(uniqueMapsMap.values());
     if (selectedAnalyticsMap || activeAnalyticsTab === 'overall' || activeAnalyticsTab === 'matchups') updateAnalyticsData();
 
-    // 1. Overall Win Rate
     const wins = rankedMatches.filter(m => m.result === 'win').length;
-    const winRate = Math.round((wins / totalMatches) * 100);
+    const losses = rankedMatches.filter(m => m.result === 'loss').length;
+    const decisive = wins + losses;
+    const winRate = decisive > 0 ? Math.round((wins / decisive) * 100) : 0;
     
     document.getElementById('overall-winrate-text').textContent = `${winRate}%`;
     document.getElementById('overall-winrate-circle').style.background = `conic-gradient(var(--accent-blue) ${winRate * 3.6}deg, var(--bg-surface) 0deg)`;
+    const countEl = document.getElementById('overall-match-count');
+    if (countEl) {
+        const draws = totalMatches - decisive;
+        countEl.textContent = draws > 0
+            ? `${totalMatches} ranked (${wins}W-${losses}L, ${draws} draw)`
+            : `${totalMatches} ranked (${wins}W-${losses}L)`;
+    }
 
     // 2. Top Brawlers
     const brawlerStats = {};
@@ -2306,7 +2509,7 @@ function renderCollection(brawlersData) {
 
         // Smart portrait URL: HD if available, fallback to brawlify
         const portraitUrl = getPortraitUrl(properName, globalBrawler);
-        const fallbackUrl = globalBrawler ? (globalBrawler.imageUrl2 || globalBrawler.imageUrl || '') : '';
+        const fallbackUrl = resolveBrawlerIconUrl(b, globalBrawler);
         
         // Safety checks for API arrays
         const gCount = b.gadgets ? b.gadgets.length : 0;
@@ -2391,6 +2594,479 @@ function renderCollection(brawlersData) {
         `;
         collectionGrid.appendChild(card);
     });
+}
+
+// --- General Strategy & Tier Lists ---
+const GUIDE_NOTES_KEY = 'brawl_guide_notes_v1';
+const GUIDE_TIERLISTS_KEY = 'brawl_guide_tierlists_v1';
+const GUIDE_DEFAULT_TIERS = [
+    { label: 'S', color: '#ff4757' },
+    { label: 'A', color: '#ffa502' },
+    { label: 'B', color: '#eccc68' },
+    { label: 'C', color: '#7bed9f' },
+    { label: 'D', color: '#70a1ff' }
+];
+
+let guideTierLists = [];
+let guideActiveTierListId = null;
+let guideSelectedTierId = null;
+let guideActiveTab = 'notes';
+let guideNotesSaveTimer = null;
+let guideTierSaveTimer = null;
+let guideStrategyInitialized = false;
+
+function isGuideViewActive() {
+    return document.getElementById('guide')?.classList.contains('active') ?? false;
+}
+
+function guideNewId() {
+    return `g_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function loadGuideTierLists() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(GUIDE_TIERLISTS_KEY) || '{"lists":[]}');
+        guideTierLists = (Array.isArray(raw.lists) ? raw.lists : []).map(list => ({
+            ...list,
+            tiers: Array.isArray(list.tiers) ? list.tiers.map(t => ({
+                ...t,
+                brawlers: Array.isArray(t.brawlers) ? t.brawlers : []
+            })) : []
+        }));
+    } catch {
+        guideTierLists = [];
+    }
+}
+
+async function ensureGuideBrawlersLoaded() {
+    return fetchBrawlersOnce();
+}
+
+function saveGuideTierListsToStorage() {
+    localStorage.setItem(GUIDE_TIERLISTS_KEY, JSON.stringify({ lists: guideTierLists }));
+}
+
+function loadGuideNotesIntoForm() {
+    const titleEl = document.getElementById('guide-notes-title');
+    const bodyEl = document.getElementById('guide-notes-body');
+    if (!titleEl || !bodyEl) return;
+    try {
+        const data = JSON.parse(localStorage.getItem(GUIDE_NOTES_KEY) || '{}');
+        titleEl.value = data.title || '';
+        bodyEl.value = data.body || '';
+    } catch {
+        titleEl.value = '';
+        bodyEl.value = '';
+    }
+    setGuideNotesStatus('saved');
+}
+
+function saveGuideNotes(showFlash = true) {
+    const titleEl = document.getElementById('guide-notes-title');
+    const bodyEl = document.getElementById('guide-notes-body');
+    if (!titleEl || !bodyEl) return;
+    localStorage.setItem(GUIDE_NOTES_KEY, JSON.stringify({
+        title: titleEl.value.trim(),
+        body: bodyEl.value,
+        updatedAt: new Date().toISOString()
+    }));
+    if (showFlash) setGuideNotesStatus('saved');
+}
+
+function setGuideNotesStatus(state) {
+    const el = document.getElementById('guide-notes-status');
+    if (!el) return;
+    if (state === 'saved') {
+        el.textContent = 'Saved';
+        el.classList.remove('unsaved');
+    } else {
+        el.textContent = 'Unsaved';
+        el.classList.add('unsaved');
+    }
+}
+
+function setGuideTierListStatus(state) {
+    const el = document.getElementById('guide-tierlist-status');
+    if (!el) return;
+    if (state === 'saved') {
+        el.textContent = 'Saved';
+        el.classList.remove('unsaved');
+    } else {
+        el.textContent = 'Unsaved';
+        el.classList.add('unsaved');
+    }
+}
+
+function getActiveGuideTierList() {
+    return guideTierLists.find(t => t.id === guideActiveTierListId) || null;
+}
+
+function createDefaultTierList(name = 'New tier list') {
+    return {
+        id: guideNewId(),
+        name,
+        tiers: GUIDE_DEFAULT_TIERS.map(t => ({
+            id: guideNewId(),
+            label: t.label,
+            color: t.color,
+            brawlers: []
+        })),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function brawlerChipPayload(b) {
+    return {
+        id: Number(b.id),
+        name: b.name,
+        icon: b.imageUrl || b.imageUrl2 || brawlifyBrawlerIconUrl(b.id)
+    };
+}
+
+function findBrawlerInAllTiers(list, brawlerId) {
+    for (const tier of list.tiers) {
+        const idx = tier.brawlers.findIndex(x => Number(x.id) === Number(brawlerId));
+        if (idx >= 0) return { tier, idx };
+    }
+    return null;
+}
+
+function addBrawlerToTier(list, tierId, payload) {
+    const existing = findBrawlerInAllTiers(list, payload.id);
+    if (existing) existing.tier.brawlers.splice(existing.idx, 1);
+    const tier = list.tiers.find(t => t.id === tierId);
+    if (!tier) return;
+    if (!tier.brawlers.some(x => Number(x.id) === Number(payload.id))) {
+        tier.brawlers.push(payload);
+    }
+    list.updatedAt = new Date().toISOString();
+    scheduleGuideTierSave();
+    renderGuideTierListEditor();
+    renderGuideBrawlerPool();
+}
+
+function scheduleGuideNotesSave() {
+    setGuideNotesStatus('unsaved');
+    clearTimeout(guideNotesSaveTimer);
+    guideNotesSaveTimer = setTimeout(() => saveGuideNotes(true), 800);
+}
+
+function scheduleGuideTierSave() {
+    setGuideTierListStatus('unsaved');
+    clearTimeout(guideTierSaveTimer);
+    guideTierSaveTimer = setTimeout(() => {
+        saveGuideTierListsToStorage();
+        setGuideTierListStatus('saved');
+        renderGuideTierListNav();
+    }, 400);
+}
+
+function applyGuideTabPanels() {
+    document.querySelectorAll('.guide-sub-tab').forEach(btn => {
+        const active = btn.dataset.guideTab === guideActiveTab;
+        btn.classList.toggle('active', active);
+        const ind = btn.querySelector('.guide-tab-indicator');
+        if (ind) ind.style.display = active ? 'block' : 'none';
+    });
+    document.getElementById('guide-notes-panel')?.classList.toggle('active', guideActiveTab === 'notes');
+    document.getElementById('guide-tierlists-panel')?.classList.toggle('active', guideActiveTab === 'tierlists');
+}
+
+window.switchGuideTab = function(tabName) {
+    if (tabName !== 'notes' && tabName !== 'tierlists') return;
+    guideActiveTab = tabName;
+    applyGuideTabPanels();
+    renderGuideView();
+};
+
+function renderGuideTierListNav() {
+    const nav = document.getElementById('guide-tierlist-nav');
+    if (!nav) return;
+    nav.innerHTML = '';
+    if (guideTierLists.length === 0) {
+        nav.innerHTML = '<li style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem;">No lists yet</li>';
+        return;
+    }
+    guideTierLists.forEach(list => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = list.name || 'Untitled';
+        btn.classList.toggle('active', list.id === guideActiveTierListId);
+        btn.addEventListener('click', () => {
+            guideActiveTierListId = list.id;
+            guideSelectedTierId = list.tiers[0]?.id || null;
+            renderGuideTierListNav();
+            renderGuideTierListEditor();
+        });
+        li.appendChild(btn);
+        nav.appendChild(li);
+    });
+}
+
+function renderGuideBrawlerChip(b, tierId, list) {
+    const chip = document.createElement('div');
+    chip.className = 'guide-brawler-chip';
+    chip.draggable = true;
+    chip.dataset.brawlerId = String(b.id);
+    chip.dataset.tierId = tierId;
+    chip.innerHTML = `
+        <img src="${b.icon || brawlifyBrawlerIconUrl(b.id)}" alt="" onerror="this.src='https://via.placeholder.com/28'">
+        <span>${b.name}</span>
+        <button type="button" class="chip-remove" title="Remove">&times;</button>
+    `;
+    chip.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('application/json', JSON.stringify({ brawlerId: b.id, fromTierId: tierId }));
+        e.dataTransfer.effectAllowed = 'move';
+    });
+    chip.querySelector('.chip-remove').addEventListener('click', e => {
+        e.stopPropagation();
+        const tier = list.tiers.find(t => t.id === tierId);
+        if (!tier) return;
+        tier.brawlers = tier.brawlers.filter(x => Number(x.id) !== Number(b.id));
+        scheduleGuideTierSave();
+        renderGuideTierListEditor();
+        renderGuideBrawlerPool();
+    });
+    return chip;
+}
+
+function renderGuideTierListEditor() {
+    const emptyEl = document.getElementById('guide-tierlist-empty');
+    const activeWrap = document.getElementById('guide-tierlist-active');
+    const rowsEl = document.getElementById('guide-tier-rows');
+    const nameInput = document.getElementById('guide-tierlist-name');
+    const list = getActiveGuideTierList();
+    if (!emptyEl || !activeWrap || !rowsEl) return;
+
+    if (!list) {
+        emptyEl.style.display = 'flex';
+        activeWrap.style.display = 'none';
+        return;
+    }
+    emptyEl.style.display = 'none';
+    activeWrap.style.display = 'flex';
+    if (nameInput && nameInput !== document.activeElement) nameInput.value = list.name || '';
+
+    rowsEl.innerHTML = '';
+    list.tiers.forEach(tier => {
+        const row = document.createElement('div');
+        row.className = 'guide-tier-row' + (tier.id === guideSelectedTierId ? ' selected' : '');
+        row.dataset.tierId = tier.id;
+
+        const labelWrap = document.createElement('div');
+        labelWrap.className = 'guide-tier-label-wrap';
+        const labelInput = document.createElement('input');
+        labelInput.className = 'guide-tier-label-input';
+        labelInput.value = tier.label;
+        labelInput.maxLength = 4;
+        labelInput.addEventListener('click', e => e.stopPropagation());
+        labelInput.addEventListener('input', () => {
+            tier.label = labelInput.value;
+            scheduleGuideTierSave();
+        });
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.className = 'guide-tier-color';
+        colorInput.value = tier.color || '#70a1ff';
+        colorInput.addEventListener('click', e => e.stopPropagation());
+        colorInput.addEventListener('input', () => {
+            tier.color = colorInput.value;
+            row.style.borderLeftColor = tier.color;
+            scheduleGuideTierSave();
+        });
+        labelWrap.appendChild(labelInput);
+        labelWrap.appendChild(colorInput);
+
+        const drop = document.createElement('div');
+        drop.className = 'guide-tier-drop';
+        drop.style.borderLeft = `4px solid ${tier.color || '#70a1ff'}`;
+        tier.brawlers.forEach(b => drop.appendChild(renderGuideBrawlerChip(b, tier.id, list)));
+
+        row.addEventListener('click', () => {
+            guideSelectedTierId = tier.id;
+            document.querySelectorAll('.guide-tier-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+        });
+
+        ['dragenter', 'dragover'].forEach(evt => {
+            drop.addEventListener(evt, e => {
+                e.preventDefault();
+                row.classList.add('drag-over');
+            });
+        });
+        drop.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        drop.addEventListener('drop', e => {
+            e.preventDefault();
+            row.classList.remove('drag-over');
+            try {
+                const data = JSON.parse(e.dataTransfer.getData('application/json'));
+                const gb = brawlers.find(x => Number(x.id) === Number(data.brawlerId));
+                const payload = gb ? brawlerChipPayload(gb) : { id: data.brawlerId, name: `Brawler ${data.brawlerId}`, icon: brawlifyBrawlerIconUrl(data.brawlerId) };
+                addBrawlerToTier(list, tier.id, payload);
+            } catch { /* ignore */ }
+        });
+
+        const actions = document.createElement('div');
+        actions.className = 'guide-tier-row-actions';
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'guide-tier-remove-btn';
+        removeBtn.title = 'Remove tier row';
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            if (list.tiers.length <= 1) return;
+            if (!confirm('Remove this tier row? Brawlers in it will be unranked in the pool.')) return;
+            list.tiers = list.tiers.filter(t => t.id !== tier.id);
+            if (guideSelectedTierId === tier.id) guideSelectedTierId = list.tiers[0]?.id || null;
+            scheduleGuideTierSave();
+            renderGuideTierListEditor();
+            renderGuideBrawlerPool();
+        });
+        actions.appendChild(removeBtn);
+
+        row.appendChild(labelWrap);
+        row.appendChild(drop);
+        row.appendChild(actions);
+        rowsEl.appendChild(row);
+    });
+}
+
+async function renderGuideBrawlerPool() {
+    const pool = document.getElementById('guide-brawler-pool');
+    const searchEl = document.getElementById('guide-brawler-search');
+    if (!pool || !isGuideViewActive() || guideActiveTab !== 'tierlists') return;
+    const query = (searchEl?.value || '').toLowerCase().trim();
+    const list = getActiveGuideTierList();
+    const placedIds = new Set();
+    if (list) {
+        list.tiers.forEach(t => t.brawlers.forEach(b => placedIds.add(Number(b.id))));
+    }
+
+    pool.innerHTML = '';
+    if (!brawlers.length) {
+        pool.innerHTML = '<p class="guide-pool-empty">Loading brawlers…</p>';
+        const ok = await ensureGuideBrawlersLoaded();
+        if (!brawlers.length) {
+            pool.innerHTML = ok
+                ? '<p class="guide-pool-empty">No brawlers returned from API.</p>'
+                : '<p class="guide-pool-empty">Could not load brawlers. Open via Vercel/Netlify or run the local proxy (Launch.bat).</p>';
+            return;
+        }
+        pool.innerHTML = '';
+    }
+    if (!list) {
+        pool.innerHTML = '<p class="guide-pool-empty">Select or create a tier list first.</p>';
+        return;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'guide-brawler-pool-grid';
+    const filtered = brawlers.filter(b => !query || b.name.toLowerCase().includes(query));
+
+    filtered.forEach(b => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'guide-pool-item';
+        item.title = placedIds.has(Number(b.id)) ? `${b.name} (move from current tier)` : b.name;
+        item.innerHTML = `
+            <img src="${b.imageUrl || brawlifyBrawlerIconUrl(b.id)}" alt="" onerror="this.src='https://via.placeholder.com/36'">
+            <span>${b.name}</span>
+        `;
+        item.addEventListener('click', () => {
+            if (!guideSelectedTierId) {
+                guideSelectedTierId = list.tiers[0]?.id || null;
+            }
+            if (!guideSelectedTierId) return;
+            addBrawlerToTier(list, guideSelectedTierId, brawlerChipPayload(b));
+        });
+        grid.appendChild(item);
+    });
+
+    if (filtered.length === 0) {
+        pool.innerHTML = '<p class="guide-pool-empty">No brawlers match your search.</p>';
+        return;
+    }
+    pool.appendChild(grid);
+}
+
+function renderGuideView() {
+    if (!document.getElementById('guide')) return;
+    applyGuideTabPanels();
+    loadGuideNotesIntoForm();
+    renderGuideTierListNav();
+    renderGuideTierListEditor();
+    if (guideActiveTab === 'tierlists') {
+        renderGuideBrawlerPool();
+    }
+}
+
+function initGuideStrategy() {
+    if (!document.getElementById('guide')) return;
+    if (guideStrategyInitialized) return;
+    guideStrategyInitialized = true;
+
+    loadGuideTierLists();
+    loadGuideNotesIntoForm();
+
+    if (guideTierLists.length > 0 && !guideActiveTierListId) {
+        guideActiveTierListId = guideTierLists[0].id;
+        guideSelectedTierId = guideTierLists[0].tiers[0]?.id || null;
+    }
+
+    const subTabs = document.querySelector('.guide-sub-tabs');
+    if (subTabs && !subTabs.dataset.guideWired) {
+        subTabs.dataset.guideWired = '1';
+        subTabs.addEventListener('click', e => {
+            const btn = e.target.closest('.guide-sub-tab');
+            if (!btn?.dataset.guideTab) return;
+            switchGuideTab(btn.dataset.guideTab);
+        });
+    }
+
+    document.getElementById('guide-notes-save-btn')?.addEventListener('click', () => saveGuideNotes(true));
+    document.getElementById('guide-notes-title')?.addEventListener('input', scheduleGuideNotesSave);
+    document.getElementById('guide-notes-body')?.addEventListener('input', scheduleGuideNotesSave);
+
+    document.getElementById('guide-new-tierlist-btn')?.addEventListener('click', () => {
+        const list = createDefaultTierList(`Tier list ${guideTierLists.length + 1}`);
+        guideTierLists.unshift(list);
+        guideActiveTierListId = list.id;
+        guideSelectedTierId = list.tiers[0]?.id || null;
+        saveGuideTierListsToStorage();
+        switchGuideTab('tierlists');
+        renderGuideView();
+    });
+
+    document.getElementById('guide-tierlist-name')?.addEventListener('input', e => {
+        const list = getActiveGuideTierList();
+        if (!list) return;
+        list.name = e.target.value;
+        scheduleGuideTierSave();
+        renderGuideTierListNav();
+    });
+
+    document.getElementById('guide-add-tier-btn')?.addEventListener('click', () => {
+        const list = getActiveGuideTierList();
+        if (!list) return;
+        list.tiers.push({ id: guideNewId(), label: '?', color: '#a4b0be', brawlers: [] });
+        scheduleGuideTierSave();
+        renderGuideTierListEditor();
+    });
+
+    document.getElementById('guide-delete-tierlist-btn')?.addEventListener('click', () => {
+        const list = getActiveGuideTierList();
+        if (!list) return;
+        if (!confirm(`Delete tier list "${list.name}"?`)) return;
+        guideTierLists = guideTierLists.filter(t => t.id !== list.id);
+        guideActiveTierListId = guideTierLists[0]?.id || null;
+        guideSelectedTierId = guideTierLists[0]?.tiers[0]?.id || null;
+        saveGuideTierListsToStorage();
+        renderGuideView();
+    });
+
+    document.getElementById('guide-brawler-search')?.addEventListener('input', renderGuideBrawlerPool);
 }
 
 // Start app

@@ -49,10 +49,23 @@ body {
 
 .sidebar {
     width: 260px;
+    min-width: 260px;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
     background: rgba(0, 0, 0, 0.2);
     border-right: 1px solid var(--border-color);
-    padding: 2rem 0;
+    padding: 2rem 0 1rem;
     backdrop-filter: blur(20px);
+    overflow: hidden;
+}
+
+.sidebar .nav-links {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 1rem;
 }
 
 .logo {
@@ -101,6 +114,10 @@ body {
     padding: 2rem 4rem;
     max-width: 1200px;
     margin: 0 auto;
+}
+
+.main-content:has(#guide.view.active) {
+    max-width: 1400px;
 }
 
 header {
@@ -1168,4 +1185,448 @@ select option {
     outline: none;
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+/* ======================================= */
+/* General Strategy & Tier Lists           */
+/* ======================================= */
+
+#guide .header-with-actions {
+    margin-bottom: 1.25rem;
+}
+
+.guide-sub-tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+.guide-sub-tab {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    position: relative;
+    font-weight: 600;
+    font-family: var(--font-main);
+    transition: color 0.3s;
+}
+
+.guide-sub-tab.active {
+    color: var(--accent-blue);
+}
+
+.guide-sub-tab.active .guide-tab-indicator {
+    display: block;
+}
+
+.guide-panel {
+    display: none;
+}
+
+.guide-panel.active {
+    display: block;
+}
+
+.guide-notes-card {
+    align-items: stretch;
+    padding: 1.25rem;
+}
+
+.guide-notes-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.guide-notes-title {
+    flex: 1;
+    min-width: 200px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-family: var(--font-main);
+    font-size: 1.1rem;
+    font-weight: 700;
+    padding: 0.65rem 0.85rem;
+}
+
+.guide-notes-title:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.guide-notes-body {
+    width: 100%;
+    min-height: 420px;
+    resize: vertical;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-family: var(--font-main);
+    font-size: 0.95rem;
+    line-height: 1.55;
+    padding: 1rem 1.1rem;
+}
+
+.guide-notes-body:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.guide-save-status {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    min-width: 4.5rem;
+    text-align: right;
+}
+
+.guide-save-status.unsaved {
+    color: var(--accent-yellow);
+}
+
+.guide-toolbar-btn {
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+}
+
+.guide-btn-muted {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+}
+
+.guide-tierlists-layout {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr) 240px;
+    gap: 1rem;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .guide-tierlists-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.guide-tierlists-sidebar {
+    padding: 1rem;
+    align-items: stretch;
+}
+
+.guide-sidebar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.guide-sidebar-head h3 {
+    font-size: 0.95rem;
+    color: var(--text-muted);
+}
+
+.guide-tierlist-nav {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.guide-tierlist-nav li button {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-main);
+    padding: 0.55rem 0.65rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: var(--font-main);
+    font-size: 0.9rem;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.guide-tierlist-nav li button:hover {
+    background: var(--bg-surface-hover);
+}
+
+.guide-tierlist-nav li button.active {
+    background: rgba(14, 165, 233, 0.12);
+    border-color: rgba(14, 165, 233, 0.35);
+    color: var(--accent-blue);
+}
+
+.guide-tierlist-editor {
+    padding: 1rem;
+    min-height: 480px;
+    align-items: stretch;
+}
+
+.guide-editor-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 360px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 2rem;
+}
+
+.guide-tierlist-active {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.guide-editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.guide-tierlist-name-input {
+    flex: 1;
+    min-width: 160px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-family: var(--font-main);
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 0.5rem 0.75rem;
+}
+
+.guide-tier-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.guide-tier-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    align-items: stretch;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: rgba(0, 0, 0, 0.15);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.guide-tier-row.selected {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.25);
+}
+
+.guide-tier-row.drag-over {
+    border-color: var(--accent-yellow);
+    background: rgba(234, 179, 8, 0.06);
+}
+
+.guide-tier-label-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.35rem;
+    border-right: 1px solid var(--border-color);
+}
+
+.guide-tier-label-input {
+    width: 100%;
+    text-align: center;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-weight: 800;
+    font-size: 1rem;
+    font-family: var(--font-main);
+}
+
+.guide-tier-color {
+    width: 28px;
+    height: 22px;
+    border: none;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+.guide-tier-drop {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    min-height: 56px;
+    padding: 0.45rem;
+}
+
+.guide-tier-row-actions {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0.25rem;
+}
+
+.guide-tier-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0.25rem 0.4rem;
+    line-height: 1;
+}
+
+.guide-tier-remove-btn:hover {
+    color: var(--color-loss);
+}
+
+.guide-brawler-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    padding: 0.2rem 0.5rem 0.2rem 0.2rem;
+    cursor: grab;
+    user-select: none;
+    font-size: 0.78rem;
+    font-weight: 600;
+    max-width: 140px;
+}
+
+.guide-brawler-chip:active {
+    cursor: grabbing;
+}
+
+.guide-brawler-chip img {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.guide-brawler-chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.guide-brawler-chip .chip-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.95rem;
+    padding: 0 0.15rem;
+    line-height: 1;
+}
+
+.guide-brawler-chip .chip-remove:hover {
+    color: var(--color-loss);
+}
+
+.guide-brawler-pool {
+    padding: 1rem;
+    align-items: stretch;
+    max-height: calc(100vh - 8rem);
+    display: flex;
+    flex-direction: column;
+}
+
+.guide-brawler-pool h3 {
+    font-size: 0.95rem;
+    margin-bottom: 0.35rem;
+}
+
+.guide-pool-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 0.65rem;
+    line-height: 1.35;
+}
+
+.guide-brawler-search {
+    width: 100%;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-family: var(--font-main);
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.65rem;
+    font-size: 0.85rem;
+}
+
+.guide-brawler-search:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.guide-brawler-pool-grid {
+    flex: 1;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 0.4rem;
+    align-content: start;
+    padding-right: 0.25rem;
+}
+
+.guide-pool-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.35rem 0.2rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: var(--bg-dark);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.guide-pool-item:hover {
+    border-color: var(--accent-blue);
+    background: rgba(14, 165, 233, 0.08);
+}
+
+.guide-pool-item img {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.guide-pool-item span {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.1;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.guide-pool-empty {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    padding: 1rem 0;
+    text-align: center;
 }

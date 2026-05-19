@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brawlysis – Match Tracker</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260519">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -20,6 +20,7 @@
                 <li data-view="analytics">Match Analytics</li>
                 <li data-view="collection">Collection</li>
                 <li data-view="strategies">Map Strategies</li>
+                <li data-view="guide">General Strategy</li>
                 <li data-view="settings">Settings (Map Pool)</li>
             </ul>
         </nav>
@@ -246,6 +247,68 @@
                 </div>
             </section>
 
+            <!-- General Strategy & Tier Lists -->
+            <section id="guide" class="view">
+                <div class="header-with-actions">
+                    <h2>General Strategy</h2>
+                </div>
+                <div class="sub-tabs-bar guide-sub-tabs">
+                    <button type="button" class="guide-sub-tab active" data-guide-tab="notes">
+                        Strategy notes
+                        <div class="tab-indicator guide-tab-indicator"></div>
+                    </button>
+                    <button type="button" class="guide-sub-tab" data-guide-tab="tierlists">
+                        Tier lists
+                        <div class="tab-indicator guide-tab-indicator" style="display:none;"></div>
+                    </button>
+                </div>
+
+                <div id="guide-notes-panel" class="guide-panel active">
+                    <div class="stat-card guide-notes-card">
+                        <div class="guide-notes-toolbar">
+                            <input type="text" id="guide-notes-title" class="guide-notes-title" placeholder="Title (e.g. Ranked fundamentals)" maxlength="120">
+                            <span id="guide-notes-status" class="guide-save-status">Saved</span>
+                            <button type="button" id="guide-notes-save-btn" class="primary-btn guide-toolbar-btn">Save</button>
+                        </div>
+                        <textarea id="guide-notes-body" class="guide-notes-body" placeholder="Write general strategy here: draft picks, macro rules, ban priorities, mode-specific tips…"></textarea>
+                    </div>
+                </div>
+
+                <div id="guide-tierlists-panel" class="guide-panel">
+                    <div class="guide-tierlists-layout">
+                        <aside class="guide-tierlists-sidebar stat-card">
+                            <div class="guide-sidebar-head">
+                                <h3>Your lists</h3>
+                                <button type="button" id="guide-new-tierlist-btn" class="primary-btn guide-toolbar-btn">+ New</button>
+                            </div>
+                            <ul id="guide-tierlist-nav" class="guide-tierlist-nav"></ul>
+                        </aside>
+
+                        <div class="guide-tierlist-editor stat-card" id="guide-tierlist-editor">
+                            <div class="guide-editor-empty" id="guide-tierlist-empty">
+                                <p>Create a tier list or select one from the sidebar.</p>
+                            </div>
+                            <div id="guide-tierlist-active" class="guide-tierlist-active" style="display:none;">
+                                <div class="guide-editor-toolbar">
+                                    <input type="text" id="guide-tierlist-name" class="guide-tierlist-name-input" placeholder="Tier list name">
+                                    <button type="button" id="guide-add-tier-btn" class="primary-btn guide-toolbar-btn guide-btn-muted">+ Tier row</button>
+                                    <button type="button" id="guide-delete-tierlist-btn" class="danger-btn guide-toolbar-btn">Delete list</button>
+                                    <span id="guide-tierlist-status" class="guide-save-status">Saved</span>
+                                </div>
+                                <div id="guide-tier-rows" class="guide-tier-rows"></div>
+                            </div>
+                        </div>
+
+                        <aside class="guide-brawler-pool stat-card">
+                            <h3>Add brawlers</h3>
+                            <p class="guide-pool-hint">Click a tier row, then click a brawler — or drag onto a tier.</p>
+                            <input type="text" id="guide-brawler-search" class="guide-brawler-search" placeholder="Search brawlers…" autocomplete="off">
+                            <div id="guide-brawler-pool" class="guide-brawler-pool"></div>
+                        </aside>
+                    </div>
+                </div>
+            </section>
+
             <!-- Settings View -->
             <section id="settings" class="view">
                 <div class="header-with-actions">
@@ -367,6 +430,6 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20260519"></script>
 </body>
 </html>
