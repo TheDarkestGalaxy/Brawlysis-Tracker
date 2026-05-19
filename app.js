@@ -55,21 +55,38 @@ function isMapInRankedPool(mapName) {
     return RANKED_POOL.some(rp => normalizeMapName(rp) === norm);
 }
 
-/** Supercell battle.type — `ranked` is competitive ranked, not Trophy Road (see API BattleType). */
+const RANKED_BATTLE_TYPES = new Set(['ranked', 'soloranked', 'teamranked', 'competitive']);
+const NON_RANKED_BATTLE_TYPES = new Set(['friendly', 'practice', 'tournament', 'challenge', 'casual']);
+
+function isRankedBattleType(battleType) {
+    return RANKED_BATTLE_TYPES.has(String(battleType || '').toLowerCase());
+}
+
+/** Supercell battle.type — competitive ranked only, not Trophy Road ladder. */
 function isBattleRanked(battle) {
     if (!battle) return false;
     const battleType = (battle.type || '').toLowerCase();
-    if (battleType === 'soloranked' || battleType === 'teamranked' || battleType === 'ranked' || battleType === 'competitive') {
-        return true;
-    }
-    if (['friendly', 'practice', 'tournament', 'challenge'].includes(battleType)) {
+    // Trophy delta on non-ranked types = ladder / Trophy Road
+    if (battle.trophyChange != null && !RANKED_BATTLE_TYPES.has(battleType)) {
         return false;
     }
-    // Trophy Road / ladder: trophy delta without a ranked battle type
-    if (battle.trophyChange != null && battleType !== 'ranked') {
-        return false;
-    }
+    if (RANKED_BATTLE_TYPES.has(battleType)) return true;
+    if (NON_RANKED_BATTLE_TYPES.has(battleType)) return false;
     return false;
+}
+
+/** Whether a stored match counts toward ranked stats (dashboard win rate, analytics). */
+function isRankedMatch(m) {
+    if (!m) return false;
+    if (m.source === 'api') {
+        const bt = String(m.battleType || '').toLowerCase();
+        if (RANKED_BATTLE_TYPES.has(bt)) return true;
+        if (m.trophyChange != null) return false;
+        if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
+        return false;
+    }
+    if (m.isRanked === false) return false;
+    return true;
 }
 
 const MATCH_LIST_PAGE_SIZE = 50;
@@ -104,6 +121,18 @@ function migrateLegacyRankedFlags() {
             changed++;
         });
         localStorage.setItem('brawl_ranked_type_fix_v2', '1');
+    }
+    // Undo v2: re-tag API matches strictly from battle type / trophy delta
+    if (!localStorage.getItem('brawl_ranked_type_fix_v3')) {
+        matches.forEach(m => {
+            if (m.source !== 'api') return;
+            const ranked = isRankedMatch(m);
+            if (m.isRanked !== ranked) {
+                m.isRanked = ranked;
+                changed++;
+            }
+        });
+        localStorage.setItem('brawl_ranked_type_fix_v3', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -926,7 +955,7 @@ async function init() {
     if (matchupTargetInput) {
         matchupTargetInput.addEventListener('input', () => {
             if (activeAnalyticsTab === 'matchups') {
-                renderMatchupTable(matches.filter(m => m.isRanked !== false));
+                renderMatchupTable(matches.filter(isRankedMatch));
             }
         });
     }
@@ -1710,9 +1739,9 @@ function renderMatches() {
     // Filter matches based on the active tab
     const filteredMatches = matches.filter(m => {
         if (activeMatchTab === 'ranked') {
-            return m.isRanked !== false; // Include legacy (undefined) as ranked, and explicit isRanked: true
+            return isRankedMatch(m);
         } else {
-            return m.isRanked === false; // Only explicit trophy matches
+            return !isRankedMatch(m);
         }
     });
 
@@ -2051,6 +2080,7 @@ async function syncBattlelog() {
                 result,
                 isRanked,
                 battleType,
+                trophyChange: item.battle.trophyChange ?? null,
                 date: battleDate,
                 opponentBrawlers: oppBrawlers
             };
@@ -2065,6 +2095,11 @@ async function syncBattlelog() {
                 }
                 if (oldMatch.battleType !== battleType) {
                     oldMatch.battleType = battleType;
+                    repaired = true;
+                }
+                const tc = item.battle.trophyChange ?? null;
+                if (oldMatch.trophyChange !== tc) {
+                    oldMatch.trophyChange = tc;
                     repaired = true;
                 }
                 if (oldMatch.isRanked !== isRanked || oldMatch.result !== result) {
@@ -2141,7 +2176,7 @@ async function handleCheckIP() {
 // Render Dashboard
 function updateDashboard() {
     // Filter for only ranked matches for analytics
-    const rankedMatches = matches.filter(m => m.isRanked !== false); // Assume true if missing (for legacy) but sync sets true
+    const rankedMatches = matches.filter(isRankedMatch);
     const totalMatches = rankedMatches.length;
 
     if (totalMatches === 0) {
@@ -2226,9 +2261,9 @@ function updateDashboard() {
         `;
     });
 
-    // 3. Best Modes
+    // 3. Best Modes (ranked only)
     const modeStats = {};
-    matches.forEach(m => {
+    rankedMatches.forEach(m => {
         const modeKey = `${m.modeName} - ${m.mapName}`;
         if (!modeStats[modeKey]) {
             // Fallback icon lookup if missing in match record
@@ -2330,7 +2365,7 @@ function updateAnalyticsData() {
     const mapSection = document.getElementById('analytics-map-section');
     const heading = document.getElementById('analytics-brawlers-heading');
     const matchupPanel = document.getElementById('analytics-matchup-panel');
-    const rankedMatches = matches.filter(m => m.isRanked !== false);
+    const rankedMatches = matches.filter(isRankedMatch);
 
     if (activeAnalyticsTab === 'matchups') {
         if (mapSection) mapSection.style.display = 'none';
