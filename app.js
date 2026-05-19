@@ -75,16 +75,52 @@ function isBattleRanked(battle) {
     return false;
 }
 
+/** Battle log rows use Supercell battleTime as id (e.g. 20260407T123456.000Z). */
+function isApiSyncedMatch(m) {
+    if (!m) return false;
+    if (m.source === 'api') return true;
+    return /^\d{8}T\d{6}/.test(String(m.id || ''));
+}
+
+/** Classify a stored API battle row (strict: ranked type required). */
+function classifyApiStoredMatch(m) {
+    const bt = String(m.battleType || '').toLowerCase();
+    if (RANKED_BATTLE_TYPES.has(bt)) {
+        if (m.trophyChange != null) return false;
+        return true;
+    }
+    if (m.trophyChange != null) return false;
+    if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
+    if (m.isRanked === false) return false;
+    return false;
+}
+
+/** Re-tag all API-synced rows; fixes legacy data missing source / mis-tagged by old migrations. */
+function repairStoredMatchRankFlags() {
+    let changed = 0;
+    matches.forEach(m => {
+        if (!isApiSyncedMatch(m)) return;
+        if (m.source !== 'api') {
+            m.source = 'api';
+            changed++;
+        }
+        const ranked = classifyApiStoredMatch(m);
+        if (m.isRanked !== ranked) {
+            m.isRanked = ranked;
+            changed++;
+        }
+    });
+    if (changed > 0) {
+        rebuildMatchIdIndex();
+        localStorage.setItem('brawl_matches', JSON.stringify(matches));
+    }
+    return changed;
+}
+
 /** Whether a stored match counts toward ranked stats (dashboard win rate, analytics). */
 function isRankedMatch(m) {
     if (!m) return false;
-    if (m.source === 'api') {
-        const bt = String(m.battleType || '').toLowerCase();
-        if (RANKED_BATTLE_TYPES.has(bt)) return true;
-        if (m.trophyChange != null) return false;
-        if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
-        return false;
-    }
+    if (isApiSyncedMatch(m)) return classifyApiStoredMatch(m);
     if (m.isRanked === false) return false;
     return true;
 }
@@ -126,13 +162,18 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v3')) {
         matches.forEach(m => {
             if (m.source !== 'api') return;
-            const ranked = isRankedMatch(m);
+            const ranked = classifyApiStoredMatch(m);
             if (m.isRanked !== ranked) {
                 m.isRanked = ranked;
                 changed++;
             }
         });
         localStorage.setItem('brawl_ranked_type_fix_v3', '1');
+    }
+    // v4: legacy rows synced before `source: 'api'` (battleTime id only) — strict reclassify
+    if (!localStorage.getItem('brawl_ranked_type_fix_v4')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v4', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -913,6 +954,7 @@ const strategyCanvas = document.getElementById('strategy-canvas');
 async function init() {
     rebuildMatchIdIndex();
     migrateLegacyRankedFlags();
+    repairStoredMatchRankFlags();
     updateProfileCard();
     renderMatches();
     updateDashboard();
@@ -1842,7 +1884,7 @@ function purgeNonRotationMatches(silent = false) {
     
     matches = matches.filter(m => {
         if (m.isRanked === false) return true;
-        if (m.source === 'api') return true;
+        if (isApiSyncedMatch(m)) return true;
         return isMapInRankedPool(m.mapName);
     });
     
@@ -2089,6 +2131,10 @@ async function syncBattlelog() {
             if (existingIdx !== undefined) {
                 const oldMatch = matches[existingIdx];
                 let repaired = false;
+                if (oldMatch.source !== 'api') {
+                    oldMatch.source = 'api';
+                    repaired = true;
+                }
                 if (oppBrawlers.length && JSON.stringify(oldMatch.opponentBrawlers || []) !== JSON.stringify(oppBrawlers)) {
                     oldMatch.opponentBrawlers = oppBrawlers;
                     repaired = true;
@@ -2119,14 +2165,17 @@ async function syncBattlelog() {
             matches.sort(compareMatchesNewestFirst);
             rebuildMatchIdIndex();
         }
+
+        const flagsRepaired = repairStoredMatchRankFlags();
         
-        if (newCount > 0 || updatedCount > 0) {
-            rebuildMatchIdIndex();
+        if (newCount > 0 || updatedCount > 0 || flagsRepaired > 0) {
+            if (flagsRepaired > 0) rebuildMatchIdIndex();
             localStorage.setItem('brawl_matches', JSON.stringify(matches));
             renderMatches();
             updateDashboard();
             if (newCount > 0) console.log(`[Sync] Added ${newCount} new matches`);
             if (updatedCount > 0) console.log(`[Sync] Repaired ${updatedCount} existing matches`);
+            if (flagsRepaired > 0) console.log(`[Sync] Reclassified ${flagsRepaired} match rank flags`);
         }
         
         lastSyncTime = new Date();
