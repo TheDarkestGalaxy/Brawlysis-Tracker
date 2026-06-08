@@ -50,6 +50,17 @@ function normalizeMapName(name) {
     return (name || '').toLowerCase().replace(/[\s\-\.]+/g, ' ').trim();
 }
 
+function normalizeModeName(name) {
+    return (name || '').toLowerCase().replace(/[\s\-\._]+/g, '');
+}
+
+/** Same map/mode row whether mode came from BrawlAPI ("Brawl Ball") or battle log ("brawlBall"). */
+function matchesAnalyticsMap(m, selected) {
+    if (!m || !selected) return false;
+    return normalizeModeName(m.modeName) === normalizeModeName(selected.modeName)
+        && normalizeMapName(m.mapName) === normalizeMapName(selected.mapName);
+}
+
 function isMapInRankedPool(mapName) {
     const norm = normalizeMapName(mapName);
     return RANKED_POOL.some(rp => normalizeMapName(rp) === norm);
@@ -85,10 +96,7 @@ function isApiSyncedMatch(m) {
 /** Classify a stored API battle row (strict: ranked type required). */
 function classifyApiStoredMatch(m) {
     const bt = String(m.battleType || '').toLowerCase();
-    if (RANKED_BATTLE_TYPES.has(bt)) {
-        if (m.trophyChange != null) return false;
-        return true;
-    }
+    if (RANKED_BATTLE_TYPES.has(bt)) return true;
     if (m.trophyChange != null) return false;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
     if (m.isRanked === false) return false;
@@ -174,6 +182,11 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v4')) {
         changed += repairStoredMatchRankFlags();
         localStorage.setItem('brawl_ranked_type_fix_v4', '1');
+    }
+    // v5: ranked API rows with trophyChange were wrongly excluded from analytics
+    if (!localStorage.getItem('brawl_ranked_type_fix_v5')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v5', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -2243,9 +2256,7 @@ function updateDashboard() {
     const uniqueMapsMap = new Map();
     
     rankedMatches.forEach(m => {
-        if (!isMapInRankedPool(m.mapName)) return;
-        
-        const key = `${m.modeName} - ${m.mapName}`;
+        const key = `${normalizeModeName(m.modeName)}|${normalizeMapName(m.mapName)}`;
         if (!uniqueMapsMap.has(key)) {
             // Find better icon if current one is broken
             let icon = m.modeIcon;
@@ -2477,7 +2488,7 @@ function updateAnalyticsData() {
         return;
     }
 
-    const mapMatches = rankedMatches.filter(m => m.modeName === selectedAnalyticsMap.modeName && m.mapName === selectedAnalyticsMap.mapName);
+    const mapMatches = rankedMatches.filter(m => matchesAnalyticsMap(m, selectedAnalyticsMap));
 
     if (mapMatches.length === 0) {
         analyticsBrawlersList.innerHTML = '<li class="empty-state">No data available for this map.</li>';
