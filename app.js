@@ -66,22 +66,18 @@ function isMapInRankedPool(mapName) {
     return RANKED_POOL.some(rp => normalizeMapName(rp) === norm);
 }
 
-const RANKED_BATTLE_TYPES = new Set(['ranked', 'soloranked', 'teamranked', 'competitive']);
+/** Competitive Ranked (solo queue, team queue, club league power matches). */
+const COMPETITIVE_RANKED_BATTLE_TYPES = new Set(['soloranked', 'teamranked', 'competitive']);
+/** Trophy Road ladder — Supercell API type string is misleadingly `"ranked"`. */
+const TROPHY_ROAD_BATTLE_TYPE = 'ranked';
 const NON_RANKED_BATTLE_TYPES = new Set(['friendly', 'practice', 'tournament', 'challenge', 'casual']);
 
-function isRankedBattleType(battleType) {
-    return RANKED_BATTLE_TYPES.has(String(battleType || '').toLowerCase());
-}
-
-/** Supercell battle.type — competitive ranked only, not Trophy Road ladder. */
+/** Supercell battle.type — competitive Ranked only, not Trophy Road ladder. */
 function isBattleRanked(battle) {
     if (!battle) return false;
     const battleType = (battle.type || '').toLowerCase();
-    // Trophy delta on non-ranked types = ladder / Trophy Road
-    if (battle.trophyChange != null && !RANKED_BATTLE_TYPES.has(battleType)) {
-        return false;
-    }
-    if (RANKED_BATTLE_TYPES.has(battleType)) return true;
+    if (COMPETITIVE_RANKED_BATTLE_TYPES.has(battleType)) return true;
+    if (battleType === TROPHY_ROAD_BATTLE_TYPE) return false;
     if (NON_RANKED_BATTLE_TYPES.has(battleType)) return false;
     return false;
 }
@@ -93,11 +89,11 @@ function isApiSyncedMatch(m) {
     return /^\d{8}T\d{6}/.test(String(m.id || ''));
 }
 
-/** Classify a stored API battle row (strict: ranked type required). */
+/** Classify a stored API battle row (competitive Ranked types only). */
 function classifyApiStoredMatch(m) {
     const bt = String(m.battleType || '').toLowerCase();
-    if (RANKED_BATTLE_TYPES.has(bt)) return true;
-    if (m.trophyChange != null) return false;
+    if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
+    if (bt === TROPHY_ROAD_BATTLE_TYPE) return false;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
     if (m.isRanked === false) return false;
     return false;
@@ -187,6 +183,11 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v5')) {
         changed += repairStoredMatchRankFlags();
         localStorage.setItem('brawl_ranked_type_fix_v5', '1');
+    }
+    // v6: API type "ranked" is Trophy Road — only soloRanked/teamRanked are competitive
+    if (!localStorage.getItem('brawl_ranked_type_fix_v6')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v6', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -1957,7 +1958,7 @@ async function syncBattlelog() {
                     battleTime: new Date().toISOString().replace(/[-:]/g, '').replace('.', ''),
                     event: { mode: modes[idx], map: maps[idx] },
                     battle: {
-                        mode: modes[idx], type: "ranked", 
+                        mode: modes[idx], type: "soloRanked", 
                         result: Math.random() > 0.4 ? "victory" : "defeat",
                         teams: [[{ tag: userProfile.tag, name: userProfile.username, brawler: { name: brawlerNames[Math.floor(Math.random() * brawlerNames.length)] } }]]
                     }
