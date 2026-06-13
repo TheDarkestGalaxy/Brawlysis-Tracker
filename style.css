@@ -911,21 +911,21 @@ select option {
 .brawler-portrait-wrap {
     position: relative;
     width: 100%;
-    height: 160px;
+    height: 180px;
     background: linear-gradient(160deg, #1c1c28, #0e0e15);
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    padding: 12px;
 }
 
 .brawler-portrait-img {
-    height: 90%;
-    width: auto;
-    max-width: 95%;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
-    image-rendering: -webkit-optimize-contrast;
-    image-rendering: crisp-edges;
+    object-position: center;
+    image-rendering: auto;
     filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6));
     transition: transform 0.3s ease;
 }
@@ -992,6 +992,8 @@ select option {
     width: 14px;
     height: 14px;
     object-fit: contain;
+    color: #ffd700;
+    flex-shrink: 0;
 }
 
 .trophy-count {

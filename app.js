@@ -2707,11 +2707,19 @@ function renderCollection(brawlersData) {
     }
 
     function getPortraitUrl(name, globalBrawler) {
-        const upper = name.toUpperCase().trim();
-        // If this brawler is known to be missing on brawltime, skip HD entirely
-        if (BRAWLTIME_MISSING.has(upper)) {
-            return globalBrawler ? (globalBrawler.imageUrl2 || globalBrawler.imageUrl || '') : '';
+        // Brawlify CDN borderless art = high-res and reliable, with a consistent canvas
+        // so every portrait renders at the same size. Use it whenever we know the id.
+        if (globalBrawler && globalBrawler.id != null) {
+            const numId = Number(globalBrawler.id);
+            if (Number.isFinite(numId) && numId > 0) {
+                return `https://cdn.brawlify.com/brawlers/borderless/${numId}.png`;
+            }
         }
+        if (globalBrawler && (globalBrawler.imageUrl || globalBrawler.imageUrl2)) {
+            return globalBrawler.imageUrl || globalBrawler.imageUrl2;
+        }
+        const upper = name.toUpperCase().trim();
+        if (BRAWLTIME_MISSING.has(upper)) return '';
         const slug = toBrawltimeSlug(name);
         return `https://media.brawltime.ninja/brawlers/${slug}/avatar.png`;
     }
@@ -2809,8 +2817,10 @@ function renderCollection(brawlersData) {
             <div class="brawler-portrait-wrap" ${b.hasHypercharge ? 'style="animation: hyperPulse 1.5s infinite alternate;"' : ''}>
                 <!-- Trophy Badge -->
                 <div class="trophy-tag">
-                    <img src="https://media.brawltime.ninja/assets/icon/trophy.png" class="trophy-img" alt="Trophies">
-                    <span class="trophy-count">${b.trophies || 0}</span>
+                    <svg class="trophy-img" viewBox="0 0 24 24" fill="currentColor" aria-label="Trophies" role="img">
+                        <path d="M18 2H6v2H2v4a4 4 0 0 0 4 4 6 6 0 0 0 5 3.9V19H8v2h8v-2h-3v-3.1A6 6 0 0 0 18 12a4 4 0 0 0 4-4V4h-4V2zM4 8V6h2v4a2 2 0 0 1-2-2zm16 0a2 2 0 0 1-2 2V6h2v2z"/>
+                    </svg>
+                    <span class="trophy-count">${(b.trophies || 0).toLocaleString()}</span>
                 </div>
 
                 <img src="${portraitUrl}" 
