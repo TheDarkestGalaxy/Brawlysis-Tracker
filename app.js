@@ -2124,6 +2124,10 @@ async function syncBattlelog() {
         let newCount = 0;
         let skippedCount = 0;
         let updatedCount = 0;
+
+        // Ranked Bo3 (Mythic+) returns each game as its own entry sharing one battleTime.
+        // Track per-battleTime occurrences so every individual game is stored, not collapsed.
+        const battleTimeOccurrences = new Map();
         
         items.forEach(item => {
             // Safety check for malformed entries
@@ -2232,8 +2236,15 @@ async function syncBattlelog() {
             
             const oppBrawlers = extractOpponentBrawlersFromBattle(item, userProfile.tag);
 
+            // Distinguish individual games within the same Bo3 (identical battleTime).
+            // Order in the battlelog is stable, so occurrence #n maps to the same game each sync.
+            const battleTimeId = item.battleTime;
+            const occurrence = (battleTimeOccurrences.get(battleTimeId) || 0) + 1;
+            battleTimeOccurrences.set(battleTimeId, occurrence);
+            const matchId = occurrence === 1 ? battleTimeId : `${battleTimeId}#${occurrence}`;
+
             const newMatch = {
-                id: item.battleTime,
+                id: matchId,
                 source: 'api',  // Tag as API-synced so it never gets purged
                 brawlerId: mappedBrawler ? mappedBrawler.id : myBrawlerId,
                 brawlerName: mappedBrawler ? mappedBrawler.name : myBrawlerName,
@@ -2249,7 +2260,7 @@ async function syncBattlelog() {
                 opponentBrawlers: oppBrawlers
             };
             
-            const existingIdx = matchIdIndex.get(String(item.battleTime));
+            const existingIdx = matchIdIndex.get(String(matchId));
             if (existingIdx !== undefined) {
                 const oldMatch = matches[existingIdx];
                 let repaired = false;
@@ -2287,7 +2298,7 @@ async function syncBattlelog() {
                 if (repaired) updatedCount++;
             } else {
                 matches.push(newMatch);
-                matchIdIndex.set(String(item.battleTime), matches.length - 1);
+                matchIdIndex.set(String(matchId), matches.length - 1);
                 newCount++;
             }
         });
