@@ -47,7 +47,26 @@ function tagsEqual(a, b) {
 }
 
 function normalizeMapName(name) {
-    return (name || '').toLowerCase().replace(/[\s\-\.]+/g, ' ').trim();
+    let s = String(name || '');
+    s = s.replace(/([a-z])([A-Z])/g, '$1 $2');
+    s = s.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+    return s.toLowerCase().replace(/[_\-\.]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Strip legacy "Mode - Map" prefixes so the same map is not split in analytics. */
+function extractMapLabel(raw) {
+    let s = String(raw || '').trim();
+    if (!s) return 'Unknown Map';
+    const dashIdx = s.lastIndexOf(' - ');
+    if (dashIdx > 0) {
+        const right = s.slice(dashIdx + 3).trim();
+        if (right) s = right;
+    }
+    return s.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function mapNameKey(name) {
+    return normalizeMapName(extractMapLabel(name));
 }
 
 function normalizeModeName(name) {
@@ -69,7 +88,7 @@ const MODE_CANONICAL_LABELS = {
 };
 
 function canonicalMapName(raw) {
-    return (raw || 'Unknown Map').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+    return extractMapLabel(raw);
 }
 
 function canonicalModeName(raw, mappedMap) {
@@ -84,8 +103,8 @@ function canonicalModeName(raw, mappedMap) {
 }
 
 function findRankedMapEntry(mapRaw) {
-    const norm = normalizeMapName(mapRaw);
-    return rankedMaps.find(m => normalizeMapName(m.name) === norm) || null;
+    const norm = mapNameKey(mapRaw);
+    return rankedMaps.find(m => mapNameKey(m.name) === norm) || null;
 }
 
 /** Group brawler stats even when API rows use id 0 before BrawlAPI loads. */
@@ -97,12 +116,12 @@ function brawlerStatsKey(m) {
 /** Per-map analytics: ranked maps are unique by name (mode labels vary in stored data). */
 function matchesAnalyticsMap(m, selected) {
     if (!m || !selected) return false;
-    return normalizeMapName(m.mapName) === normalizeMapName(selected.mapName);
+    return mapNameKey(m.mapName) === mapNameKey(selected.mapName);
 }
 
 function isMapInRankedPool(mapName) {
-    const norm = normalizeMapName(mapName);
-    return RANKED_POOL.some(rp => normalizeMapName(rp) === norm);
+    const norm = mapNameKey(mapName);
+    return RANKED_POOL.some(rp => mapNameKey(rp) === norm);
 }
 
 /** Competitive Ranked (solo queue, team queue, club league power matches). */
@@ -110,6 +129,13 @@ const COMPETITIVE_RANKED_BATTLE_TYPES = new Set(['soloranked', 'teamranked', 'co
 /** Trophy Road ladder — Supercell API type string is misleadingly `"ranked"`. */
 const TROPHY_ROAD_BATTLE_TYPE = 'ranked';
 const NON_RANKED_BATTLE_TYPES = new Set(['friendly', 'practice', 'tournament', 'challenge', 'casual']);
+
+function hasTrophyRoadSignal(m) {
+    const bt = String(m.battleType || '').toLowerCase();
+    if (bt === TROPHY_ROAD_BATTLE_TYPE) return true;
+    const tc = m.trophyChange;
+    return typeof tc === 'number' && tc !== 0;
+}
 
 /** Supercell battle.type — competitive Ranked only, not Trophy Road ladder. */
 function isBattleRanked(battle) {
@@ -134,10 +160,10 @@ function classifyApiStoredMatch(m) {
     if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
     if (bt === TROPHY_ROAD_BATTLE_TYPE) return false;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
-    if (m.trophyChange != null) return false;
     if (m.isRanked === false) return false;
-    // Legacy rows synced before battleType was persisted
-    if (!bt && m.isRanked === true) return true;
+    if (hasTrophyRoadSignal(m)) return false;
+    // Legacy API rows missing battleType — include unless trophy signals above
+    if (!bt) return true;
     return false;
 }
 
@@ -255,6 +281,12 @@ function migrateLegacyRankedFlags() {
         changed += repairStoredMatchRankFlags();
         changed += repairStoredMatchMetadata();
         localStorage.setItem('brawl_ranked_type_fix_v7', '1');
+    }
+    // v8: fix map label splitting (e.g. "Knockout - Flowing Springs") and relax legacy API rank tags
+    if (!localStorage.getItem('brawl_ranked_type_fix_v8')) {
+        changed += repairStoredMatchRankFlags();
+        changed += repairStoredMatchMetadata();
+        localStorage.setItem('brawl_ranked_type_fix_v8', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -2343,7 +2375,7 @@ function updateDashboard() {
     const uniqueMapsMap = new Map();
     
     rankedMatches.forEach(m => {
-        const key = normalizeMapName(m.mapName);
+        const key = mapNameKey(m.mapName);
         if (!uniqueMapsMap.has(key)) {
             const mappedMap = findRankedMapEntry(m.mapName);
             const modeLabel = canonicalModeName(m.modeName, mappedMap) || m.modeName || 'Ranked';
@@ -2580,14 +2612,23 @@ function updateAnalyticsData() {
     }
 
     const mapMatches = rankedMatches.filter(m => matchesAnalyticsMap(m, selectedAnalyticsMap));
+    const allOnMap = matches.filter(m => matchesAnalyticsMap(m, selectedAnalyticsMap));
+    const excludedOnMap = allOnMap.length - mapMatches.length;
 
     if (mapMatches.length === 0) {
-        analyticsBrawlersList.innerHTML = '<li class="empty-state">No data available for this map.</li>';
+        const hint = excludedOnMap > 0
+            ? `No ranked data for this map (${excludedOnMap} trophy/other match${excludedOnMap === 1 ? '' : 'es'} stored).`
+            : 'No data available for this map.';
+        analyticsBrawlersList.innerHTML = `<li class="empty-state">${hint}</li>`;
         return;
     }
 
     if (heading) {
-        heading.textContent = `Brawler performance (${selectedAnalyticsMap.mapName}) — ${mapMatches.length} ranked match${mapMatches.length === 1 ? '' : 'es'}`;
+        let title = `Brawler performance (${selectedAnalyticsMap.mapName}) — ${mapMatches.length} ranked match${mapMatches.length === 1 ? '' : 'es'}`;
+        if (excludedOnMap > 0) {
+            title += ` (${excludedOnMap} trophy excluded)`;
+        }
+        heading.textContent = title;
     }
 
     const brawlerStats = {};
