@@ -54,11 +54,50 @@ function normalizeModeName(name) {
     return (name || '').toLowerCase().replace(/[\s\-\._]+/g, '');
 }
 
-/** Same map/mode row whether mode came from BrawlAPI ("Brawl Ball") or battle log ("brawlBall"). */
+const MODE_CANONICAL_LABELS = {
+    gemgrab: 'Gem Grab',
+    heist: 'Heist',
+    bounty: 'Bounty',
+    brawlball: 'Brawl Ball',
+    hotzone: 'Hot Zone',
+    knockout: 'Knockout',
+    duels: 'Duels',
+    wipeout: 'Wipeout',
+    payload: 'Payload',
+    basketbrawl: 'Basket Brawl',
+    soloshowdown: 'Solo Showdown',
+};
+
+function canonicalMapName(raw) {
+    return (raw || 'Unknown Map').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function canonicalModeName(raw, mappedMap) {
+    if (mappedMap?.gameMode?.name) {
+        return mappedMap.gameMode.name.replace(/-/g, ' ').trim();
+    }
+    const norm = normalizeModeName(raw);
+    if (MODE_CANONICAL_LABELS[norm]) return MODE_CANONICAL_LABELS[norm];
+    if (!norm || norm === 'ranked') return '';
+    const spaced = String(raw || '').replace(/-/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+    return spaced || String(raw || '').trim();
+}
+
+function findRankedMapEntry(mapRaw) {
+    const norm = normalizeMapName(mapRaw);
+    return rankedMaps.find(m => normalizeMapName(m.name) === norm) || null;
+}
+
+/** Group brawler stats even when API rows use id 0 before BrawlAPI loads. */
+function brawlerStatsKey(m) {
+    if (m.brawlerId && m.brawlerId !== 0) return `id:${m.brawlerId}`;
+    return `name:${normalizeBrawlerName(m.brawlerName)}`;
+}
+
+/** Per-map analytics: ranked maps are unique by name (mode labels vary in stored data). */
 function matchesAnalyticsMap(m, selected) {
     if (!m || !selected) return false;
-    return normalizeModeName(m.modeName) === normalizeModeName(selected.modeName)
-        && normalizeMapName(m.mapName) === normalizeMapName(selected.mapName);
+    return normalizeMapName(m.mapName) === normalizeMapName(selected.mapName);
 }
 
 function isMapInRankedPool(mapName) {
@@ -95,8 +134,30 @@ function classifyApiStoredMatch(m) {
     if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
     if (bt === TROPHY_ROAD_BATTLE_TYPE) return false;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
+    if (m.trophyChange != null) return false;
     if (m.isRanked === false) return false;
+    // Legacy rows synced before battleType was persisted
+    if (!bt && m.isRanked === true) return true;
     return false;
+}
+
+/** Normalize map/mode strings so the same ranked map is not split across analytics rows. */
+function repairStoredMatchMetadata() {
+    let changed = 0;
+    matches.forEach(m => {
+        const canonMap = canonicalMapName(m.mapName);
+        if (m.mapName !== canonMap) {
+            m.mapName = canonMap;
+            changed++;
+        }
+        const mappedMap = findRankedMapEntry(canonMap);
+        const canonMode = canonicalModeName(m.modeName, mappedMap);
+        if (canonMode && m.modeName !== canonMode) {
+            m.modeName = canonMode;
+            changed++;
+        }
+    });
+    return changed;
 }
 
 /** Re-tag all API-synced rows; fixes legacy data missing source / mis-tagged by old migrations. */
@@ -188,6 +249,12 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v6')) {
         changed += repairStoredMatchRankFlags();
         localStorage.setItem('brawl_ranked_type_fix_v6', '1');
+    }
+    // v7: include legacy ranked rows missing battleType; unify map/mode labels for analytics
+    if (!localStorage.getItem('brawl_ranked_type_fix_v7')) {
+        changed += repairStoredMatchRankFlags();
+        changed += repairStoredMatchMetadata();
+        localStorage.setItem('brawl_ranked_type_fix_v7', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -969,6 +1036,7 @@ async function init() {
     rebuildMatchIdIndex();
     migrateLegacyRankedFlags();
     repairStoredMatchRankFlags();
+    repairStoredMatchMetadata();
     updateProfileCard();
     renderMatches();
     updateDashboard();
@@ -1506,6 +1574,12 @@ async function fetchGameData() {
 
     if (isGuideViewActive() && guideActiveTab === 'tierlists') {
         renderGuideBrawlerPool();
+    }
+
+    const metaRepaired = repairStoredMatchMetadata();
+    if (metaRepaired > 0) {
+        localStorage.setItem('brawl_matches', JSON.stringify(matches));
+        updateDashboard();
     }
 }
 
@@ -2074,7 +2148,9 @@ async function syncBattlelog() {
             const mappedBrawler = brawlers.find(b => normalizeBrawlerName(b.name) === normalizedMyBrawler);
             
             // Try to find map in ranked pool for icon, but DON'T skip if not found
-            const mappedMap = rankedMaps.find(m => m.name === (item.event.map || ''));
+            const mapRaw = item.event.map || 'Unknown Map';
+            const mappedMap = findRankedMapEntry(mapRaw);
+            const modeLabel = canonicalModeName(item.battle.mode || item.event.mode, mappedMap) || 'Unknown Mode';
             
             // Determine result: prefer official `battle.result` (3v3 / most modes). Rank rules only when that is absent (Showdown-style).
             let result = 'loss';
@@ -2130,8 +2206,8 @@ async function syncBattlelog() {
                 brawlerId: mappedBrawler ? mappedBrawler.id : myBrawlerId,
                 brawlerName: mappedBrawler ? mappedBrawler.name : myBrawlerName,
                 brawlerIcon: mappedBrawler ? mappedBrawler.imageUrl : resolveBrawlerIconUrl(myBrawlerId),
-                modeName: mappedMap?.gameMode?.name || item.battle.mode || item.event.mode || 'Ranked',
-                mapName: item.event.map || 'Unknown Map',
+                modeName: modeLabel,
+                mapName: canonicalMapName(mapRaw),
                 modeIcon: mappedMap?.gameMode?.imageUrl || '',
                 result,
                 isRanked,
@@ -2167,6 +2243,15 @@ async function syncBattlelog() {
                     oldMatch.result = result;
                     repaired = true;
                 }
+                if (oldMatch.modeName !== modeLabel) {
+                    oldMatch.modeName = modeLabel;
+                    repaired = true;
+                }
+                const canonMap = canonicalMapName(mapRaw);
+                if (oldMatch.mapName !== canonMap) {
+                    oldMatch.mapName = canonMap;
+                    repaired = true;
+                }
                 if (repaired) updatedCount++;
             } else {
                 matches.push(newMatch);
@@ -2181,9 +2266,10 @@ async function syncBattlelog() {
         }
 
         const flagsRepaired = repairStoredMatchRankFlags();
+        const metaRepaired = repairStoredMatchMetadata();
         
-        if (newCount > 0 || updatedCount > 0 || flagsRepaired > 0) {
-            if (flagsRepaired > 0) rebuildMatchIdIndex();
+        if (newCount > 0 || updatedCount > 0 || flagsRepaired > 0 || metaRepaired > 0) {
+            if (flagsRepaired > 0 || metaRepaired > 0) rebuildMatchIdIndex();
             localStorage.setItem('brawl_matches', JSON.stringify(matches));
             renderMatches();
             updateDashboard();
@@ -2257,16 +2343,18 @@ function updateDashboard() {
     const uniqueMapsMap = new Map();
     
     rankedMatches.forEach(m => {
-        const key = `${normalizeModeName(m.modeName)}|${normalizeMapName(m.mapName)}`;
+        const key = normalizeMapName(m.mapName);
         if (!uniqueMapsMap.has(key)) {
+            const mappedMap = findRankedMapEntry(m.mapName);
+            const modeLabel = canonicalModeName(m.modeName, mappedMap) || m.modeName || 'Ranked';
             // Find better icon if current one is broken
             let icon = m.modeIcon;
             if (!icon || icon === "undefined" || icon === "") {
-                const normalizedMode = m.modeName.toUpperCase().replace(/[\s\-\.]+/g, '-');
+                const normalizedMode = modeLabel.toUpperCase().replace(/[\s\-\.]+/g, '-');
                 const modeId = MODE_ICON_MAP[normalizedMode] || MODE_ICON_MAP[normalizedMode.replace(/-/g, '_')] || MODE_ICON_MAP[normalizedMode.replace(/-/g, '')];
                 if (modeId) icon = `https://cdn.brawlify.com/game-modes/regular/${modeId}.png`;
             }
-            uniqueMapsMap.set(key, { modeName: m.modeName, mapName: m.mapName, modeIcon: icon || 'https://cdn.brawlify.com/game-modes/regular/48000000.png' });
+            uniqueMapsMap.set(key, { modeName: modeLabel, mapName: canonicalMapName(m.mapName), modeIcon: icon || 'https://cdn.brawlify.com/game-modes/regular/48000000.png' });
         }
     });
     playedMaps = Array.from(uniqueMapsMap.values());
@@ -2290,11 +2378,12 @@ function updateDashboard() {
     // 2. Top Brawlers
     const brawlerStats = {};
     rankedMatches.forEach(m => {
-        if (!brawlerStats[m.brawlerId]) {
-            brawlerStats[m.brawlerId] = { name: m.brawlerName, icon: m.brawlerIcon, matches: 0, wins: 0 };
+        const key = brawlerStatsKey(m);
+        if (!brawlerStats[key]) {
+            brawlerStats[key] = { name: m.brawlerName, icon: m.brawlerIcon, matches: 0, wins: 0 };
         }
-        brawlerStats[m.brawlerId].matches++;
-        if (m.result === 'win') brawlerStats[m.brawlerId].wins++;
+        brawlerStats[key].matches++;
+        if (m.result === 'win') brawlerStats[key].wins++;
     });
 
     const sortedBrawlers = Object.values(brawlerStats)
@@ -2463,11 +2552,12 @@ function updateAnalyticsData() {
 
         const brawlerStats = {};
         rankedMatches.forEach(m => {
-            if (!brawlerStats[m.brawlerId]) {
-                brawlerStats[m.brawlerId] = { name: m.brawlerName, icon: m.brawlerIcon, matches: 0, wins: 0 };
+            const key = brawlerStatsKey(m);
+            if (!brawlerStats[key]) {
+                brawlerStats[key] = { name: m.brawlerName, icon: m.brawlerIcon, matches: 0, wins: 0 };
             }
-            brawlerStats[m.brawlerId].matches++;
-            if (m.result === 'win') brawlerStats[m.brawlerId].wins++;
+            brawlerStats[key].matches++;
+            if (m.result === 'win') brawlerStats[key].wins++;
         });
 
         const sortedBrawlers = Object.values(brawlerStats)
@@ -2496,13 +2586,18 @@ function updateAnalyticsData() {
         return;
     }
 
+    if (heading) {
+        heading.textContent = `Brawler performance (${selectedAnalyticsMap.mapName}) — ${mapMatches.length} ranked match${mapMatches.length === 1 ? '' : 'es'}`;
+    }
+
     const brawlerStats = {};
     mapMatches.forEach(m => {
-        if (!brawlerStats[m.brawlerId]) {
-            brawlerStats[m.brawlerId] = { name: m.brawlerName, icon: m.brawlerIcon, matches: 0, wins: 0 };
+        const key = brawlerStatsKey(m);
+        if (!brawlerStats[key]) {
+            brawlerStats[key] = { name: m.brawlerName, icon: m.brawlerIcon, matches: 0, wins: 0 };
         }
-        brawlerStats[m.brawlerId].matches++;
-        if (m.result === 'win') brawlerStats[m.brawlerId].wins++;
+        brawlerStats[key].matches++;
+        if (m.result === 'win') brawlerStats[key].wins++;
     });
 
     const sortedBrawlers = Object.values(brawlerStats)
