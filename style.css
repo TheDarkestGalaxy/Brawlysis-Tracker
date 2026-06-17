@@ -1632,3 +1632,34 @@ select option {
     padding: 1rem 0;
     text-align: center;
 }
+
+/* Ranked Season Progress */
+.season-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.season-table th,
+.season-table td {
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.season-table th {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.season-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+#season-chart {
+    max-width: 100%;
+}

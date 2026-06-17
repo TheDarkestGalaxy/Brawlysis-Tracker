@@ -1289,6 +1289,7 @@ navLinks.forEach(link => {
             }
         });
         if (targetView === 'analytics') updateAnalyticsData();
+        if (targetView === 'season') renderSeasonProgress();
         if (targetView === 'strategies') {
             strategyResizeCanvas();
             strategyLoad();
@@ -1334,10 +1335,6 @@ saveApiBtn.addEventListener('click', async () => {
 });
 
 // Modal Logic
-addMatchBtn.addEventListener('click', () => {
-    modalOverlay.classList.add('active');
-});
-
 openLinkModalBtn.addEventListener('click', () => {
     linkAccountModal.classList.add('active');
     if (userProfile) {
@@ -1365,36 +1362,46 @@ closeLinkBtn.addEventListener('click', () => {
 });
 
 function closeModal() {
-    modalOverlay.classList.remove('active');
-    matchForm.reset();
-    document.getElementById('result-win').checked = true;
-    
-    // Reset dropdowns
+    if (modalOverlay) modalOverlay.classList.remove('active');
+    if (matchForm) matchForm.reset();
+    const winRadio = document.getElementById('result-win');
+    if (winRadio) winRadio.checked = true;
+
+    // Reset dropdowns (no-ops if the add-match UI is not present)
     selectedBrawler = null;
-    brawlerSearch.value = '';
-    brawlerIcon.style.display = 'none';
+    if (brawlerSearch) brawlerSearch.value = '';
+    if (brawlerIcon) brawlerIcon.style.display = 'none';
     renderBrawlerOptions(brawlers);
 
     selectedMode = null;
-    modeSearch.value = '';
-    modeIcon.style.display = 'none';
+    if (modeSearch) modeSearch.value = '';
+    if (modeIcon) modeIcon.style.display = 'none';
     renderModeOptions(rankedMaps);
 }
 
 // Dropdown Setup
 function setupDropdowns() {
-    // Focus actions
-    brawlerSearch.addEventListener('focus', () => {
-        brawlerDropdown.classList.add('open');
-        brawlerSearch.value = '';
-        renderBrawlerOptions(brawlers);
-    });
+    // Brawler/mode dropdowns only exist when the (removed) add-match UI is present.
+    if (brawlerSearch && brawlerDropdown) {
+        brawlerSearch.addEventListener('focus', () => {
+            brawlerDropdown.classList.add('open');
+            brawlerSearch.value = '';
+            renderBrawlerOptions(brawlers);
+        });
+        brawlerSearch.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = brawlers.filter(b => b.name.toLowerCase().includes(query));
+            renderBrawlerOptions(filtered);
+        });
+    }
 
-    modeSearch.addEventListener('focus', () => {
-        modeDropdown.classList.add('open');
-        modeSearch.value = '';
-        renderModeOptions(rankedMaps);
-    });
+    if (modeSearch && modeDropdown) {
+        modeSearch.addEventListener('focus', () => {
+            modeDropdown.classList.add('open');
+            modeSearch.value = '';
+            renderModeOptions(rankedMaps);
+        });
+    }
 
     analyticsMapSearch.addEventListener('focus', () => {
         analyticsMapDropdown.classList.add('open');
@@ -1404,12 +1411,12 @@ function setupDropdowns() {
 
     // Close options when clicking outside
     document.addEventListener('click', (e) => {
-        if (!brawlerDropdown.contains(e.target)) {
+        if (brawlerDropdown && !brawlerDropdown.contains(e.target)) {
             brawlerDropdown.classList.remove('open');
             if (selectedBrawler) brawlerSearch.value = selectedBrawler.name;
             else brawlerSearch.value = '';
         }
-        if (!modeDropdown.contains(e.target)) {
+        if (modeDropdown && !modeDropdown.contains(e.target)) {
             modeDropdown.classList.remove('open');
             if (selectedMode) modeSearch.value = `${selectedMode.modeName} - ${selectedMode.mapName}`;
             else modeSearch.value = '';
@@ -1421,13 +1428,8 @@ function setupDropdowns() {
         }
     });
 
+    if (!modeSearch) return;
     // Search Filtering
-    brawlerSearch.addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase();
-        const filtered = brawlers.filter(b => b.name.toLowerCase().includes(query));
-        renderBrawlerOptions(filtered);
-    });
-
     modeSearch.addEventListener('input', (e) => {
         const query = e.target.value.toLowerCase();
         const filtered = rankedMaps.filter(map => {
@@ -1449,6 +1451,7 @@ function setupDropdowns() {
 }
 
 function renderBrawlerOptions(list) {
+    if (!brawlerOptions) return;
     brawlerOptions.innerHTML = '';
     if (list.length === 0) {
         brawlerOptions.innerHTML = '<div class="dropdown-option" style="color: var(--text-muted); cursor: default;">No brawlers found</div>';
@@ -1471,6 +1474,7 @@ function renderBrawlerOptions(list) {
 }
 
 function renderModeOptions(list) {
+    if (!modeOptions) return;
     modeOptions.innerHTML = '';
     if (list.length === 0) {
         modeOptions.innerHTML = '<div class="dropdown-option" style="color: var(--text-muted); cursor: default;">No ranked maps found</div>';
@@ -1805,42 +1809,6 @@ async function fetchLiveProfile() {
         console.error(err);
     }
 }
-
-// Form Submission (Add Match)
-matchForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-
-    if (!selectedBrawler) {
-        alert("Please select a Brawler.");
-        return;
-    }
-    if (!selectedMode) {
-        alert("Please select a Ranked Map & Mode.");
-        return;
-    }
-
-    const result = document.querySelector('input[name="result"]:checked').value;
-
-    const match = {
-        id: Date.now().toString(),
-        brawlerId: selectedBrawler.id,
-        brawlerName: selectedBrawler.name,
-        brawlerIcon: selectedBrawler.imageUrl,
-        modeName: selectedMode.modeName,
-        mapName: selectedMode.mapName,
-        modeIcon: selectedMode.modeIcon,
-        result,
-        isRanked: true, // Manual entries are assumed ranked for this tracker
-        date: new Date().toISOString()
-    };
-
-    matches.unshift(match);
-    localStorage.setItem('brawl_matches', JSON.stringify(matches));
-    
-    closeModal();
-    renderMatches();
-    updateDashboard();
-});
 
 // Match History Tab Switching
 window.switchMatchTab = function(tabName) {
@@ -2388,6 +2356,9 @@ async function handleCheckIP() {
 
 // Render Dashboard
 function updateDashboard() {
+    const seasonView = document.getElementById('season');
+    if (seasonView && seasonView.classList.contains('active')) renderSeasonProgress();
+
     // Filter for only ranked matches for analytics
     const rankedMatches = matches.filter(isRankedMatch);
     const totalMatches = rankedMatches.length;
@@ -2682,6 +2653,158 @@ function updateAnalyticsData() {
 
     renderAnalyticsBrawlerRows(sortedBrawlers);
 }
+
+// ===== Ranked Season Progress =====
+// Brawl Stars Ranked seasons roll over on the third Thursday of each month. We bucket every
+// ranked match into the season it was played in so each completed season is logged automatically.
+
+/** Date (UTC) of the third Thursday of the given month (month is 0-indexed). */
+function thirdThursdayOfMonth(year, month) {
+    const firstDow = new Date(Date.UTC(year, month, 1)).getUTCDay(); // 0=Sun..4=Thu
+    const firstThursday = 1 + ((4 - firstDow + 7) % 7);
+    return new Date(Date.UTC(year, month, firstThursday + 14));
+}
+
+/** Resolve a timestamp (ms) to the Ranked season it belongs to. */
+function getRankedSeasonInfo(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const d = new Date(ms);
+    let y = d.getUTCFullYear();
+    let m = d.getUTCMonth();
+    // Before this month's reset, the active season actually started last month.
+    if (d < thirdThursdayOfMonth(y, m)) {
+        m -= 1;
+        if (m < 0) { m = 11; y -= 1; }
+    }
+    const start = thirdThursdayOfMonth(y, m);
+    const label = start.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    return { key: `${y}-${String(m + 1).padStart(2, '0')}`, label, startMs: start.getTime() };
+}
+
+/** Aggregate ranked matches into chronologically ordered seasons. */
+function computeRankedSeasons() {
+    const seasons = new Map();
+    matches.forEach(m => {
+        if (!isRankedMatch(m)) return;
+        const info = getRankedSeasonInfo(matchChronoKey(m));
+        if (!info) return;
+        let s = seasons.get(info.key);
+        if (!s) {
+            s = { key: info.key, label: info.label, startMs: info.startMs, matches: 0, wins: 0, losses: 0, draws: 0 };
+            seasons.set(info.key, s);
+        }
+        s.matches++;
+        if (m.result === 'win') s.wins++;
+        else if (m.result === 'loss') s.losses++;
+        else s.draws++;
+    });
+    const arr = Array.from(seasons.values()).sort((a, b) => a.startMs - b.startMs);
+    arr.forEach(s => {
+        const decisive = s.wins + s.losses;
+        s.winRate = decisive > 0 ? Math.round((s.wins / decisive) * 100) : 0;
+    });
+    return arr;
+}
+
+function drawSeasonChart(canvas, seasons) {
+    if (!canvas) return;
+    const wrap = canvas.parentElement;
+    const cssW = Math.max(320, wrap ? wrap.clientWidth : 600);
+    const cssH = 300;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.height = cssH + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const padL = 46, padR = 18, padT = 24, padB = 52;
+    const plotW = cssW - padL - padR;
+    const plotH = cssH - padT - padB;
+
+    ctx.font = '11px sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'right';
+    for (let p = 0; p <= 100; p += 25) {
+        const y = padT + plotH * (1 - p / 100);
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(padL + plotW, y);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.fillText(p + '%', padL - 8, y);
+    }
+
+    if (!seasons.length) return;
+
+    const n = seasons.length;
+    const xFor = i => (n === 1 ? padL + plotW / 2 : padL + (plotW * i) / (n - 1));
+    const yFor = wr => padT + plotH * (1 - wr / 100);
+
+    ctx.strokeStyle = '#24d6ff';
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    seasons.forEach((s, i) => {
+        const x = xFor(i), y = yFor(s.winRate);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    seasons.forEach((s, i) => {
+        const x = xFor(i), y = yFor(s.winRate);
+        ctx.fillStyle = '#24d6ff';
+        ctx.beginPath();
+        ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(s.winRate + '%', x, y - 9);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.textBaseline = 'top';
+        ctx.font = '11px sans-serif';
+        ctx.fillText(s.label, x, padT + plotH + 10);
+    });
+}
+
+function renderSeasonProgress() {
+    const seasons = computeRankedSeasons();
+    const empty = document.getElementById('season-empty');
+    const canvas = document.getElementById('season-chart');
+    const tbody = document.getElementById('season-table-body');
+
+    if (empty) empty.style.display = seasons.length ? 'none' : 'block';
+    if (canvas) {
+        canvas.style.display = seasons.length ? 'block' : 'none';
+        if (seasons.length) drawSeasonChart(canvas, seasons);
+    }
+    if (tbody) {
+        if (!seasons.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-state" style="text-align:center;">No ranked seasons yet.</td></tr>';
+        } else {
+            tbody.innerHTML = seasons.slice().reverse().map(s => `
+                <tr>
+                    <td>${s.label}</td>
+                    <td>${s.matches}</td>
+                    <td style="color: var(--color-win, #4cdb8f);">${s.wins}</td>
+                    <td style="color: var(--color-loss, #eb5757);">${s.losses}</td>
+                    <td><strong>${s.winRate}%</strong></td>
+                </tr>`).join('');
+        }
+    }
+}
+
+window.addEventListener('resize', () => {
+    const view = document.getElementById('season');
+    if (view && view.classList.contains('active')) renderSeasonProgress();
+});
 
 // Render Collection Grid
 function renderCollection(brawlersData) {
