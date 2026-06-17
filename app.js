@@ -130,20 +130,25 @@ const COMPETITIVE_RANKED_BATTLE_TYPES = new Set(['soloranked', 'teamranked', 'co
 const TROPHY_ROAD_BATTLE_TYPE = 'ranked';
 const NON_RANKED_BATTLE_TYPES = new Set(['friendly', 'practice', 'tournament', 'challenge', 'casual']);
 
-function hasTrophyRoadSignal(m) {
-    const bt = String(m.battleType || '').toLowerCase();
-    if (bt === TROPHY_ROAD_BATTLE_TYPE) return true;
-    const tc = m.trophyChange;
+/** A (non-zero) trophy delta means Trophy Road / ladder, never competitive Ranked. */
+function battleHasTrophyDelta(x) {
+    const tc = x ? x.trophyChange : null;
     return typeof tc === 'number' && tc !== 0;
 }
 
-/** Supercell battle.type — competitive Ranked only, not Trophy Road ladder. */
+/**
+ * Supercell battle.type → competitive Ranked vs everything else.
+ * Current Ranked + Power League carry NO trophyChange. Trophy Road ladder reuses the
+ * legacy type string "ranked" AND carries a trophyChange, which is how we tell them apart.
+ */
 function isBattleRanked(battle) {
     if (!battle) return false;
-    const battleType = (battle.type || '').toLowerCase();
-    if (COMPETITIVE_RANKED_BATTLE_TYPES.has(battleType)) return true;
-    if (battleType === TROPHY_ROAD_BATTLE_TYPE) return false;
-    if (NON_RANKED_BATTLE_TYPES.has(battleType)) return false;
+    const bt = (battle.type || '').toLowerCase();
+    if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
+    if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
+    if (battleHasTrophyDelta(battle)) return false;
+    // "ranked" (or unspecified) WITHOUT a trophy delta = current Ranked mode.
+    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return true;
     return false;
 }
 
@@ -154,16 +159,18 @@ function isApiSyncedMatch(m) {
     return /^\d{8}T\d{6}/.test(String(m.id || ''));
 }
 
-/** Classify a stored API battle row (competitive Ranked types only). */
+/**
+ * Classify a stored API battle row as competitive Ranked.
+ * Source of truth is battleType + trophyChange — NOT the stored isRanked flag, which older
+ * buggy syncs could set wrong. Trophy Road carries a trophyChange; Ranked does not.
+ */
 function classifyApiStoredMatch(m) {
     const bt = String(m.battleType || '').toLowerCase();
     if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
-    if (bt === TROPHY_ROAD_BATTLE_TYPE) return false;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
-    if (m.isRanked === false) return false;
-    if (hasTrophyRoadSignal(m)) return false;
-    // Legacy API rows missing battleType — include unless trophy signals above
-    if (!bt) return true;
+    if (battleHasTrophyDelta(m)) return false;
+    // "ranked" or legacy rows with no stored type, and no trophy delta = current Ranked.
+    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return true;
     return false;
 }
 
@@ -287,6 +294,11 @@ function migrateLegacyRankedFlags() {
         changed += repairStoredMatchRankFlags();
         changed += repairStoredMatchMetadata();
         localStorage.setItem('brawl_ranked_type_fix_v8', '1');
+    }
+    // v9: type "ranked" without a trophyChange is current Ranked (was wrongly excluded as Trophy Road)
+    if (!localStorage.getItem('brawl_ranked_type_fix_v9')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v9', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -2130,6 +2142,9 @@ async function syncBattlelog() {
         const battleTimeOccurrences = new Map();
         
         items.forEach(item => {
+          // Isolate each entry: one malformed/new-brawler battle must never abort the
+          // whole loop (which previously silently dropped every match after it).
+          try {
             // Safety check for malformed entries
             if (!item.battle || !item.event) {
                 skippedCount++;
@@ -2145,13 +2160,14 @@ async function syncBattlelog() {
             let foundPlayer = false;
             
             // Handle team-based modes (never use team array index as "rank" — it is not win/loss.)
-            if (item.battle.teams) {
+            if (Array.isArray(item.battle.teams)) {
                 for (let i = 0; i < item.battle.teams.length; i++) {
                     let team = item.battle.teams[i];
+                    if (!Array.isArray(team)) continue;
                     for (let p of team) {
-                        if (tagsEqual(p.tag, userProfile.tag)) {
-                            myBrawlerName = p.brawler.name.toUpperCase();
-                            myBrawlerId = p.brawler.id || 0;
+                        if (p && tagsEqual(p.tag, userProfile.tag)) {
+                            myBrawlerName = (p.brawler?.name || '').toUpperCase();
+                            myBrawlerId = p.brawler?.id || 0;
                             foundPlayer = true;
                             break;
                         }
@@ -2161,12 +2177,12 @@ async function syncBattlelog() {
             }
             
             // Handle solo modes (Showdown, etc.) — players array instead of teams
-            if (!foundPlayer && item.battle.players) {
+            if (!foundPlayer && Array.isArray(item.battle.players)) {
                 for (let i = 0; i < item.battle.players.length; i++) {
                     let p = item.battle.players[i];
-                    if (tagsEqual(p.tag, userProfile.tag)) {
-                        myBrawlerName = p.brawler.name.toUpperCase();
-                        myBrawlerId = p.brawler.id || 0;
+                    if (p && tagsEqual(p.tag, userProfile.tag)) {
+                        myBrawlerName = (p.brawler?.name || '').toUpperCase();
+                        myBrawlerId = p.brawler?.id || 0;
                         foundPlayer = true;
                         break;
                     }
@@ -2301,6 +2317,11 @@ async function syncBattlelog() {
                 matchIdIndex.set(String(matchId), matches.length - 1);
                 newCount++;
             }
+          } catch (itemErr) {
+            // Skip just this one entry and keep processing the rest of the battlelog.
+            skippedCount++;
+            console.warn('[Sync] Skipped a battle entry due to an error (continuing):', itemErr, item);
+          }
         });
 
         if (newCount > 0) {
