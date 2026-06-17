@@ -144,12 +144,18 @@ function battleHasTrophyDelta(x) {
     return typeof tc === 'number' && tc !== 0;
 }
 
+/** Ranked mode is Elo-based: the API reports trophyChange exactly 0. Trophy Road never does. */
+function battleIsEloZero(x) {
+    return x != null && typeof x.trophyChange === 'number' && x.trophyChange === 0;
+}
+
 /**
  * Supercell battle.type → competitive Ranked vs everything else.
- * Current Ranked + Power League carry NO trophyChange. Trophy Road ladder reuses the
- * legacy type string "ranked" AND carries a trophyChange, which is how we tell them apart.
- * The ambiguous "ranked"/blank rows are only Ranked when played in a standard ranked mode,
- * which keeps special events (new brawler events, LTMs) out of ranked stats.
+ * Per the API, current Ranked battles carry type "soloRanked"/"teamRanked" and an Elo-style
+ * trophyChange of exactly 0; Trophy Road reuses type "ranked" with a NON-zero trophyChange.
+ * The ambiguous "ranked"/blank rows only count as Ranked when there is a recorded 0 trophy
+ * change AND a standard ranked mode — anything else (non-zero or no recorded change at all,
+ * i.e. old Trophy Road rows and special/event battles) is excluded.
  */
 function isBattleRanked(battle, modeName) {
     if (!battle) return false;
@@ -158,7 +164,7 @@ function isBattleRanked(battle, modeName) {
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
     if (battleHasTrophyDelta(battle)) return false;
     if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') {
-        return isRankedGameMode(modeName != null ? modeName : battle.mode);
+        return battleIsEloZero(battle) && isRankedGameMode(modeName != null ? modeName : battle.mode);
     }
     return false;
 }
@@ -180,11 +186,27 @@ function classifyApiStoredMatch(m) {
     if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
     if (battleHasTrophyDelta(m)) return false;
-    // "ranked"/blank rows with no trophy delta only count when played in a standard ranked
-    // mode — this excludes special events that were previously miscounted as ranked.
-    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return isRankedGameMode(m.modeName);
+    // Ambiguous "ranked"/blank rows count only with a recorded 0 (Elo) trophy change in a
+    // standard ranked mode. This drops Trophy Road games (non-zero, or no recorded change)
+    // and special events that were previously miscounted as ranked.
+    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return battleIsEloZero(m) && isRankedGameMode(m.modeName);
     return false;
 }
+
+/** Console helper: run `brawlClassifyReport()` in DevTools to see how stored battles classify. */
+window.brawlClassifyReport = function () {
+    const groups = {};
+    matches.forEach(m => {
+        const tc = m.trophyChange;
+        const tcKind = typeof tc === 'number' ? (tc === 0 ? 'zero' : 'nonzero') : 'none';
+        const key = `type="${m.battleType ?? ''}" | trophyChange=${tcKind} | mode="${normalizeModeName(m.modeName)}" | ranked=${isRankedMatch(m)}`;
+        groups[key] = (groups[key] || 0) + 1;
+    });
+    const rows = Object.entries(groups).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ count: v, detail: k }));
+    console.table(rows);
+    console.log(`Total: ${matches.length} | counted as ranked: ${matches.filter(isRankedMatch).length}`);
+    return rows;
+};
 
 /** Normalize map/mode strings so the same ranked map is not split across analytics rows. */
 function repairStoredMatchMetadata() {
@@ -316,6 +338,11 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v10')) {
         changed += repairStoredMatchRankFlags();
         localStorage.setItem('brawl_ranked_type_fix_v10', '1');
+    }
+    // v11: ambiguous Trophy Road rows (no recorded 0 trophy change) must NOT count as Ranked
+    if (!localStorage.getItem('brawl_ranked_type_fix_v11')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v11', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
