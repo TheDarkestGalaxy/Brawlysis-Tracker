@@ -130,6 +130,14 @@ const COMPETITIVE_RANKED_BATTLE_TYPES = new Set(['soloranked', 'teamranked', 'co
 const TROPHY_ROAD_BATTLE_TYPE = 'ranked';
 const NON_RANKED_BATTLE_TYPES = new Set(['friendly', 'practice', 'tournament', 'challenge', 'casual']);
 
+/** The only game modes that appear in competitive Ranked. Special/event modes (new-brawler
+ *  events, LTMs, showdown, duels, etc.) are NOT ranked even if their battle row looks ambiguous. */
+const RANKED_GAME_MODES = new Set(['gemgrab', 'brawlball', 'heist', 'bounty', 'hotzone', 'knockout']);
+
+function isRankedGameMode(modeRaw) {
+    return RANKED_GAME_MODES.has(normalizeModeName(modeRaw));
+}
+
 /** A (non-zero) trophy delta means Trophy Road / ladder, never competitive Ranked. */
 function battleHasTrophyDelta(x) {
     const tc = x ? x.trophyChange : null;
@@ -140,15 +148,18 @@ function battleHasTrophyDelta(x) {
  * Supercell battle.type → competitive Ranked vs everything else.
  * Current Ranked + Power League carry NO trophyChange. Trophy Road ladder reuses the
  * legacy type string "ranked" AND carries a trophyChange, which is how we tell them apart.
+ * The ambiguous "ranked"/blank rows are only Ranked when played in a standard ranked mode,
+ * which keeps special events (new brawler events, LTMs) out of ranked stats.
  */
-function isBattleRanked(battle) {
+function isBattleRanked(battle, modeName) {
     if (!battle) return false;
     const bt = (battle.type || '').toLowerCase();
     if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
     if (battleHasTrophyDelta(battle)) return false;
-    // "ranked" (or unspecified) WITHOUT a trophy delta = current Ranked mode.
-    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return true;
+    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') {
+        return isRankedGameMode(modeName != null ? modeName : battle.mode);
+    }
     return false;
 }
 
@@ -169,8 +180,9 @@ function classifyApiStoredMatch(m) {
     if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
     if (battleHasTrophyDelta(m)) return false;
-    // "ranked" or legacy rows with no stored type, and no trophy delta = current Ranked.
-    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return true;
+    // "ranked"/blank rows with no trophy delta only count when played in a standard ranked
+    // mode — this excludes special events that were previously miscounted as ranked.
+    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return isRankedGameMode(m.modeName);
     return false;
 }
 
@@ -299,6 +311,11 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v9')) {
         changed += repairStoredMatchRankFlags();
         localStorage.setItem('brawl_ranked_type_fix_v9', '1');
+    }
+    // v10: special/event battles (no trophy delta, non-standard mode) must NOT count as Ranked
+    if (!localStorage.getItem('brawl_ranked_type_fix_v10')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v10', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -2120,7 +2137,7 @@ async function syncBattlelog() {
             }
             
             const battleType = (item.battle.type || '').toLowerCase();
-            const isRanked = isBattleRanked(item.battle);
+            const isRanked = isBattleRanked(item.battle, item.battle.mode || item.event.mode);
             
             // Find User's Brawler in the teams data
             let myBrawlerName = "";
@@ -2364,7 +2381,7 @@ function updateDashboard() {
     const totalMatches = rankedMatches.length;
 
     if (totalMatches === 0) {
-        document.getElementById('overall-match-count').textContent = '0 ranked matches';
+        document.getElementById('overall-match-count').textContent = 'No ranked games this season yet';
         document.getElementById('overall-winrate-text').textContent = '0%';
         document.getElementById('overall-winrate-circle').style.background = `conic-gradient(var(--bg-surface) 360deg, var(--bg-surface) 0deg)`;
         
@@ -2395,19 +2412,28 @@ function updateDashboard() {
     playedMaps = Array.from(uniqueMapsMap.values());
     if (selectedAnalyticsMap || activeAnalyticsTab === 'overall' || activeAnalyticsTab === 'matchups') updateAnalyticsData();
 
-    const wins = rankedMatches.filter(m => m.result === 'win').length;
-    const losses = rankedMatches.filter(m => m.result === 'loss').length;
+    // Headline win rate reflects the CURRENT ranked season only (resets each season).
+    const currentSeasonKey = (getRankedSeasonInfo(Date.now()) || {}).key;
+    const seasonMatches = rankedMatches.filter(m => {
+        const info = getRankedSeasonInfo(matchChronoKey(m));
+        return info && info.key === currentSeasonKey;
+    });
+    const wins = seasonMatches.filter(m => m.result === 'win').length;
+    const losses = seasonMatches.filter(m => m.result === 'loss').length;
     const decisive = wins + losses;
     const winRate = decisive > 0 ? Math.round((wins / decisive) * 100) : 0;
-    
+
     document.getElementById('overall-winrate-text').textContent = `${winRate}%`;
     document.getElementById('overall-winrate-circle').style.background = `conic-gradient(var(--accent-blue) ${winRate * 3.6}deg, var(--bg-surface) 0deg)`;
     const countEl = document.getElementById('overall-match-count');
     if (countEl) {
-        const draws = totalMatches - decisive;
-        countEl.textContent = draws > 0
-            ? `${totalMatches} ranked (${wins}W-${losses}L, ${draws} draw)`
-            : `${totalMatches} ranked (${wins}W-${losses}L)`;
+        const seasonTotal = seasonMatches.length;
+        const draws = seasonTotal - decisive;
+        countEl.textContent = seasonTotal === 0
+            ? 'No ranked games this season yet'
+            : (draws > 0
+                ? `${seasonTotal} this season (${wins}W-${losses}L, ${draws} draw)`
+                : `${seasonTotal} this season (${wins}W-${losses}L)`);
     }
 
     // 2. Top Brawlers
