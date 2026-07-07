@@ -144,31 +144,6 @@ function battleHasTrophyDelta(x) {
     return typeof tc === 'number' && tc !== 0;
 }
 
-/** Ranked mode is Elo-based: the API reports trophyChange exactly 0. Trophy Road never does. */
-function battleIsEloZero(x) {
-    return x != null && typeof x.trophyChange === 'number' && x.trophyChange === 0;
-}
-
-/**
- * Supercell battle.type → competitive Ranked vs everything else.
- * Per the API, current Ranked battles carry type "soloRanked"/"teamRanked" and an Elo-style
- * trophyChange of exactly 0; Trophy Road reuses type "ranked" with a NON-zero trophyChange.
- * The ambiguous "ranked"/blank rows only count as Ranked when there is a recorded 0 trophy
- * change AND a standard ranked mode — anything else (non-zero or no recorded change at all,
- * i.e. old Trophy Road rows and special/event battles) is excluded.
- */
-function isBattleRanked(battle, modeName) {
-    if (!battle) return false;
-    const bt = (battle.type || '').toLowerCase();
-    if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
-    if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
-    if (battleHasTrophyDelta(battle)) return false;
-    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') {
-        return battleIsEloZero(battle) && isRankedGameMode(modeName != null ? modeName : battle.mode);
-    }
-    return false;
-}
-
 /** Battle log rows use Supercell battleTime as id (e.g. 20260407T123456.000Z). */
 function isApiSyncedMatch(m) {
     if (!m) return false;
@@ -177,20 +152,25 @@ function isApiSyncedMatch(m) {
 }
 
 /**
- * Classify a stored API battle row as competitive Ranked.
- * Source of truth is battleType + trophyChange — NOT the stored isRanked flag, which older
- * buggy syncs could set wrong. Trophy Road carries a trophyChange; Ranked does not.
+ * Classify a battle row (stored match OR a freshly-built sync row) as competitive Ranked.
+ * Source of truth is battleType + trophyChange + mode — NOT the stored isRanked flag.
+ *  - Explicit ranked types (soloRanked/teamRanked/competitive) always count.
+ *  - A non-zero trophyChange means Trophy Road / ladder → never Ranked.
+ *  - Otherwise a "ranked"/blank row counts only when it is a standard ranked mode. When there
+ *    is no recorded trophyChange at all (older rows), we additionally require the map to be in
+ *    the ranked pool so stale Trophy Road games on rotated-out maps stay excluded.
  */
 function classifyApiStoredMatch(m) {
     const bt = String(m.battleType || '').toLowerCase();
     if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
     if (battleHasTrophyDelta(m)) return false;
-    // Ambiguous "ranked"/blank rows count only with a recorded 0 (Elo) trophy change in a
-    // standard ranked mode. This drops Trophy Road games (non-zero, or no recorded change)
-    // and special events that were previously miscounted as ranked.
-    if (bt === TROPHY_ROAD_BATTLE_TYPE || bt === '') return battleIsEloZero(m) && isRankedGameMode(m.modeName);
-    return false;
+    if (bt !== TROPHY_ROAD_BATTLE_TYPE && bt !== '') return false;
+    if (!isRankedGameMode(m.modeName)) return false;
+    // Elo-based Ranked reports trophyChange as a number (0); count those outright.
+    if (typeof m.trophyChange === 'number') return true;
+    // No recorded trophyChange (legacy row): only trust it if the map is still ranked rotation.
+    return isMapInRankedPool(m.mapName);
 }
 
 /** Console helper: run `brawlClassifyReport()` in DevTools to see how stored battles classify. */
@@ -343,6 +323,12 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v11')) {
         changed += repairStoredMatchRankFlags();
         localStorage.setItem('brawl_ranked_type_fix_v11', '1');
+    }
+    // v12: v11 was too strict (dropped Ranked games with 0/absent trophy change). Re-tag so all
+    // standard-mode ranked games count again while Trophy Road (non-zero delta) stays excluded.
+    if (!localStorage.getItem('brawl_ranked_type_fix_v12')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v12', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
@@ -2157,14 +2143,13 @@ async function syncBattlelog() {
           // Isolate each entry: one malformed/new-brawler battle must never abort the
           // whole loop (which previously silently dropped every match after it).
           try {
-            // Safety check for malformed entries
-            if (!item.battle || !item.event) {
+            // Only a battle is strictly required; some rows (special events) omit `event`.
+            if (!item.battle) {
                 skippedCount++;
                 return;
             }
-            
+
             const battleType = (item.battle.type || '').toLowerCase();
-            const isRanked = isBattleRanked(item.battle, item.battle.mode || item.event.mode);
             
             // Find User's Brawler in the teams data
             let myBrawlerName = "";
@@ -2212,14 +2197,14 @@ async function syncBattlelog() {
             const mappedBrawler = brawlers.find(b => normalizeBrawlerName(b.name) === normalizedMyBrawler);
             
             // Try to find map in ranked pool for icon, but DON'T skip if not found
-            const mapRaw = item.event.map || 'Unknown Map';
+            const mapRaw = item.event?.map || 'Unknown Map';
             const mappedMap = findRankedMapEntry(mapRaw);
-            const modeLabel = canonicalModeName(item.battle.mode || item.event.mode, mappedMap) || 'Unknown Mode';
+            const modeLabel = canonicalModeName(item.battle.mode || item.event?.mode, mappedMap) || 'Unknown Mode';
             
             // Determine result: prefer official `battle.result` (3v3 / most modes). Rank rules only when that is absent (Showdown-style).
             let result = 'loss';
             const rawResult = (item.battle.result || '').toLowerCase();
-            const modeStr = (item.battle.mode || item.event.mode || '').toLowerCase();
+            const modeStr = (item.battle.mode || item.event?.mode || '').toLowerCase();
 
             if (rawResult === 'victory' || rawResult === 'win') {
                 result = 'win';
@@ -2271,6 +2256,11 @@ async function syncBattlelog() {
             battleTimeOccurrences.set(battleTimeId, occurrence);
             const matchId = occurrence === 1 ? battleTimeId : `${battleTimeId}#${occurrence}`;
 
+            const trophyChange = item.battle.trophyChange ?? null;
+            const canonMapName = canonicalMapName(mapRaw);
+            // Single source of truth: classify from the same fields we store.
+            const isRanked = classifyApiStoredMatch({ battleType, trophyChange, modeName: modeLabel, mapName: canonMapName });
+
             const newMatch = {
                 id: matchId,
                 source: 'api',  // Tag as API-synced so it never gets purged
@@ -2278,12 +2268,12 @@ async function syncBattlelog() {
                 brawlerName: mappedBrawler ? mappedBrawler.name : myBrawlerName,
                 brawlerIcon: mappedBrawler ? mappedBrawler.imageUrl : resolveBrawlerIconUrl(myBrawlerId),
                 modeName: modeLabel,
-                mapName: canonicalMapName(mapRaw),
+                mapName: canonMapName,
                 modeIcon: mappedMap?.gameMode?.imageUrl || '',
                 result,
                 isRanked,
                 battleType,
-                trophyChange: item.battle.trophyChange ?? null,
+                trophyChange,
                 date: battleDate,
                 opponentBrawlers: oppBrawlers
             };
@@ -2304,9 +2294,8 @@ async function syncBattlelog() {
                     oldMatch.battleType = battleType;
                     repaired = true;
                 }
-                const tc = item.battle.trophyChange ?? null;
-                if (oldMatch.trophyChange !== tc) {
-                    oldMatch.trophyChange = tc;
+                if (oldMatch.trophyChange !== trophyChange) {
+                    oldMatch.trophyChange = trophyChange;
                     repaired = true;
                 }
                 if (oldMatch.isRanked !== isRanked || oldMatch.result !== result) {
@@ -2318,9 +2307,8 @@ async function syncBattlelog() {
                     oldMatch.modeName = modeLabel;
                     repaired = true;
                 }
-                const canonMap = canonicalMapName(mapRaw);
-                if (oldMatch.mapName !== canonMap) {
-                    oldMatch.mapName = canonMap;
+                if (oldMatch.mapName !== canonMapName) {
+                    oldMatch.mapName = canonMapName;
                     repaired = true;
                 }
                 if (repaired) updatedCount++;
@@ -2408,7 +2396,7 @@ function updateDashboard() {
     const totalMatches = rankedMatches.length;
 
     if (totalMatches === 0) {
-        document.getElementById('overall-match-count').textContent = 'No ranked games this season yet';
+        document.getElementById('overall-match-count').textContent = 'No ranked games recorded yet';
         document.getElementById('overall-winrate-text').textContent = '0%';
         document.getElementById('overall-winrate-circle').style.background = `conic-gradient(var(--bg-surface) 360deg, var(--bg-surface) 0deg)`;
         
@@ -2439,28 +2427,35 @@ function updateDashboard() {
     playedMaps = Array.from(uniqueMapsMap.values());
     if (selectedAnalyticsMap || activeAnalyticsTab === 'overall' || activeAnalyticsTab === 'matchups') updateAnalyticsData();
 
-    // Headline win rate reflects the CURRENT ranked season only (resets each season).
+    // Headline win rate covers ALL ranked games (every season). The current season is shown
+    // underneath so nothing the player has recorded is hidden from the total.
+    const wins = rankedMatches.filter(m => m.result === 'win').length;
+    const losses = rankedMatches.filter(m => m.result === 'loss').length;
+    const decisive = wins + losses;
+    const winRate = decisive > 0 ? Math.round((wins / decisive) * 100) : 0;
+
     const currentSeasonKey = (getRankedSeasonInfo(Date.now()) || {}).key;
     const seasonMatches = rankedMatches.filter(m => {
         const info = getRankedSeasonInfo(matchChronoKey(m));
         return info && info.key === currentSeasonKey;
     });
-    const wins = seasonMatches.filter(m => m.result === 'win').length;
-    const losses = seasonMatches.filter(m => m.result === 'loss').length;
-    const decisive = wins + losses;
-    const winRate = decisive > 0 ? Math.round((wins / decisive) * 100) : 0;
+    const seasonWins = seasonMatches.filter(m => m.result === 'win').length;
+    const seasonLosses = seasonMatches.filter(m => m.result === 'loss').length;
+    const seasonDecisive = seasonWins + seasonLosses;
+    const seasonWinRate = seasonDecisive > 0 ? Math.round((seasonWins / seasonDecisive) * 100) : 0;
 
     document.getElementById('overall-winrate-text').textContent = `${winRate}%`;
     document.getElementById('overall-winrate-circle').style.background = `conic-gradient(var(--accent-blue) ${winRate * 3.6}deg, var(--bg-surface) 0deg)`;
     const countEl = document.getElementById('overall-match-count');
     if (countEl) {
-        const seasonTotal = seasonMatches.length;
-        const draws = seasonTotal - decisive;
-        countEl.textContent = seasonTotal === 0
-            ? 'No ranked games this season yet'
-            : (draws > 0
-                ? `${seasonTotal} this season (${wins}W-${losses}L, ${draws} draw)`
-                : `${seasonTotal} this season (${wins}W-${losses}L)`);
+        const draws = totalMatches - decisive;
+        const totalLine = draws > 0
+            ? `${totalMatches} ranked (${wins}W-${losses}L, ${draws} draw)`
+            : `${totalMatches} ranked (${wins}W-${losses}L)`;
+        const seasonLine = seasonMatches.length === 0
+            ? 'This season: no games yet'
+            : `This season: ${seasonWinRate}% (${seasonWins}W-${seasonLosses}L)`;
+        countEl.innerHTML = `${totalLine}<br><span style="color: var(--text-muted); font-size: 0.85em;">${seasonLine}</span>`;
     }
 
     // 2. Top Brawlers
