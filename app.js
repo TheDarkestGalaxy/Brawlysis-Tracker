@@ -162,15 +162,14 @@ function isApiSyncedMatch(m) {
  */
 function classifyApiStoredMatch(m) {
     const bt = String(m.battleType || '').toLowerCase();
-    if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;
+    if (COMPETITIVE_RANKED_BATTLE_TYPES.has(bt)) return true;   // soloRanked / teamRanked / competitive
     if (NON_RANKED_BATTLE_TYPES.has(bt)) return false;
-    if (battleHasTrophyDelta(m)) return false;
+    if (battleHasTrophyDelta(m)) return false;                  // non-zero trophy change = Trophy Road
     if (bt !== TROPHY_ROAD_BATTLE_TYPE && bt !== '') return false;
-    if (!isRankedGameMode(m.modeName)) return false;
-    // Elo-based Ranked reports trophyChange as a number (0); count those outright.
-    if (typeof m.trophyChange === 'number') return true;
-    // No recorded trophyChange (legacy row): only trust it if the map is still ranked rotation.
-    return isMapInRankedPool(m.mapName);
+    if (!isRankedGameMode(m.modeName)) return false;            // special / event modes
+    // Ambiguous "ranked"/blank rows: only competitive Ranked (Elo) records a trophy change of
+    // exactly 0. Non-zero is Trophy Road; a missing value is a legacy Trophy Road/event row.
+    return m.trophyChange === 0;
 }
 
 /** Console helper: run `brawlClassifyReport()` in DevTools to see how stored battles classify. */
@@ -329,6 +328,12 @@ function migrateLegacyRankedFlags() {
     if (!localStorage.getItem('brawl_ranked_type_fix_v12')) {
         changed += repairStoredMatchRankFlags();
         localStorage.setItem('brawl_ranked_type_fix_v12', '1');
+    }
+    // v13: v12 leaked Trophy Road games (no recorded change) on ranked-pool maps into ranked
+    // stats. Re-tag requiring an explicit 0 trophy change for ambiguous "ranked"/blank rows.
+    if (!localStorage.getItem('brawl_ranked_type_fix_v13')) {
+        changed += repairStoredMatchRankFlags();
+        localStorage.setItem('brawl_ranked_type_fix_v13', '1');
     }
     if (changed > 0) {
         rebuildMatchIdIndex();
