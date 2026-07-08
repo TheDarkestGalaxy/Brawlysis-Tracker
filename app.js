@@ -621,7 +621,7 @@ let strategySuspendUndoPush = false;
 let strategyTokens = [];
 let strategyDraggingTokenIndex = -1;
 const strategyTokenImgCache = new Map();
-const STRATEGY_TEXT_SIZE_MAP = { sm: 12, md: 14, lg: 17 };
+const STRATEGY_TEXT_SIZE_MAP = { sm: 14, md: 22, lg: 34 };
 const STRATEGY_TOKEN_SIZE_MAP = { sm: 34, md: 46, lg: 62 };
 const STRATEGY_ARROW_WIDTH_MAP = { thin: 3, med: 4, thick: 6 };
 
@@ -840,6 +840,25 @@ function strategyTokenHitTest(pt) {
     return -1;
 }
 
+/** Padding/geometry for a label chip — proportional to font size so tiers look distinct. */
+function strategyLabelBox(lbl, ctx) {
+    const fontSize = Number(lbl.size) || STRATEGY_TEXT_SIZE_MAP.md;
+    ctx.font = `600 ${fontSize}px Outfit, sans-serif`;
+    const textWidth = ctx.measureText(String(lbl.text || '')).width;
+    const padX = Math.round(fontSize * 0.55);
+    const padY = Math.round(fontSize * 0.34);
+    return {
+        fontSize,
+        padX,
+        padY,
+        x: Math.round(lbl.x - padX),
+        y: Math.round(lbl.y - padY),
+        w: Math.round(textWidth + padX * 2),
+        h: Math.round(fontSize + padY * 2),
+        r: Math.max(4, Math.round(fontSize * 0.3))
+    };
+}
+
 function strategyDrawLabels(ctx) {
     if (!ctx || !Array.isArray(strategyLabels)) return;
     ctx.save();
@@ -847,41 +866,32 @@ function strategyDrawLabels(ctx) {
     strategyLabels.forEach(lbl => {
         if (!lbl || !lbl.text) return;
         const txt = String(lbl.text);
-        const fontSize = Number(lbl.size) || 18;
-        ctx.font = `700 ${fontSize}px Outfit, sans-serif`;
-        const textWidth = ctx.measureText(txt).width;
-        const padX = 5;
-        const padY = Math.max(1, Math.round(fontSize * 0.1));
-        const boxW = textWidth + padX * 2;
-        const boxH = fontSize + padY * 2;
+        const color = lbl.color || '#ff4d4d';
+        const b = strategyLabelBox(lbl, ctx);
+        ctx.font = `600 ${b.fontSize}px Outfit, sans-serif`;
 
-        // High-contrast chip to keep labels readable on any map texture.
-        ctx.fillStyle = 'rgba(5, 8, 14, 0.82)';
-        ctx.strokeStyle = lbl.color || '#ff4d4d';
-        ctx.lineWidth = 1.5;
+        // Rounded chip: solid dark fill + crisp colored border. Pixel-snapped for sharpness.
         ctx.beginPath();
-        const r = 3;
-        const x = lbl.x - padX;
-        const y = lbl.y - padY;
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + boxW - r, y);
-        ctx.quadraticCurveTo(x + boxW, y, x + boxW, y + r);
-        ctx.lineTo(x + boxW, y + boxH - r);
-        ctx.quadraticCurveTo(x + boxW, y + boxH, x + boxW - r, y + boxH);
-        ctx.lineTo(x + r, y + boxH);
-        ctx.quadraticCurveTo(x, y + boxH, x, y + boxH - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.moveTo(b.x + b.r, b.y);
+        ctx.arcTo(b.x + b.w, b.y, b.x + b.w, b.y + b.h, b.r);
+        ctx.arcTo(b.x + b.w, b.y + b.h, b.x, b.y + b.h, b.r);
+        ctx.arcTo(b.x, b.y + b.h, b.x, b.y, b.r);
+        ctx.arcTo(b.x, b.y, b.x + b.w, b.y, b.r);
         ctx.closePath();
+        ctx.fillStyle = 'rgba(9, 12, 18, 0.9)';
         ctx.fill();
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(1.5, b.fontSize * 0.08);
+        ctx.strokeStyle = color;
         ctx.stroke();
 
-        ctx.fillStyle = '#f8fafc';
-        ctx.shadowColor = 'rgba(0,0,0,0.55)';
+        // Crisp white text — no blur, pixel-aligned.
+        ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
         ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 1;
-        ctx.fillText(txt, lbl.x, lbl.y);
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(txt, Math.round(lbl.x), Math.round(lbl.y));
     });
     ctx.restore();
 }
@@ -911,17 +921,27 @@ function strategyOpenInlineEditor(pt, color) {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'strategy-inline-editor';
-    input.placeholder = 'Type label and press Enter';
-    input.style.left = `${Math.max(6, Math.round(pt.x))}px`;
-    input.style.top = `${Math.max(6, Math.round(pt.y))}px`;
-    input.dataset.x = String(Math.max(6, Math.round(pt.x)));
-    input.dataset.y = String(Math.max(6, Math.round(pt.y)));
+    input.placeholder = 'Type label…';
+    const size = strategyCurrentFontSize();
+    const padX = Math.round(size * 0.55);
+    const padY = Math.round(size * 0.34);
+    const textX = Math.max(6, Math.round(pt.x));
+    const textY = Math.max(6, Math.round(pt.y));
+    input.dataset.x = String(textX);
+    input.dataset.y = String(textY);
     input.dataset.color = color || '#ff4d4d';
-    input.dataset.size = String(strategyCurrentFontSize());
-    // Keep the temporary input compact; label size is applied after save.
-    input.style.fontSize = '13px';
-    input.style.minWidth = '110px';
-    input.style.maxWidth = '180px';
+    input.dataset.size = String(size);
+    // WYSIWYG: the input mirrors the chip so typed text matches the saved label.
+    input.style.left = `${textX - padX}px`;
+    input.style.top = `${textY - padY}px`;
+    input.style.padding = `${padY}px ${padX}px`;
+    input.style.font = `600 ${size}px 'Outfit', sans-serif`;
+    input.style.color = '#ffffff';
+    input.style.border = `${Math.max(1.5, size * 0.08)}px solid ${color || '#ff4d4d'}`;
+    input.style.borderRadius = `${Math.max(4, Math.round(size * 0.3))}px`;
+    input.style.background = 'rgba(9, 12, 18, 0.9)';
+    input.style.minWidth = `${Math.round(size * 4)}px`;
+    input.style.maxWidth = '260px';
     wrap.appendChild(input);
     strategyEditorEl = input;
     input.focus();
@@ -944,11 +964,8 @@ function strategyLabelHitTest(pt) {
     for (let i = strategyLabels.length - 1; i >= 0; i--) {
         const lbl = strategyLabels[i];
         if (!lbl || !lbl.text) continue;
-        const fontSize = Number(lbl.size) || 18;
-        ctx.font = `700 ${fontSize}px Outfit, sans-serif`;
-        const w = ctx.measureText(lbl.text).width;
-        const h = fontSize + 8;
-        if (pt.x >= lbl.x - 4 && pt.x <= lbl.x + w + 4 && pt.y >= lbl.y - 4 && pt.y <= lbl.y + h + 4) {
+        const b = strategyLabelBox(lbl, ctx);
+        if (pt.x >= b.x && pt.x <= b.x + b.w && pt.y >= b.y && pt.y <= b.y + b.h) {
             ctx.restore();
             return i;
         }
@@ -999,16 +1016,16 @@ function strategyLoad() {
     }));
     strategyLabels = labels.map(l => {
         const rawSize = Number(l.size);
-        // Auto-migrate older larger labels to the new compact sizing.
-        const migratedSize = Number.isFinite(rawSize)
-            ? Math.max(10, Math.min(17, Math.round(rawSize * 0.78)))
-            : 14;
+        // Preserve stored size within sane bounds (no repeated down-scaling on reload).
+        const size = Number.isFinite(rawSize)
+            ? Math.max(10, Math.min(48, Math.round(rawSize)))
+            : STRATEGY_TEXT_SIZE_MAP.md;
         return {
             text: String(l.text || ''),
             x: Number(l.x) || 20,
             y: Number(l.y) || 20,
             color: String(l.color || '#ff4d4d'),
-            size: migratedSize
+            size
         };
     }).filter(l => l.text.trim().length > 0);
     strategyInkCtx.clearRect(0, 0, strategyCanvasSize.width, strategyCanvasSize.height);
