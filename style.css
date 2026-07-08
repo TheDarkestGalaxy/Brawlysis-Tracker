@@ -205,6 +205,106 @@ button {
     box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5);
 }
 
+/* Map Strategies: tool switcher + contextual option panels */
+.strategy-toolbar {
+    width: 100%;
+    margin-bottom: 1rem;
+}
+
+.strategy-toolbar-top {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    width: 100%;
+}
+
+.strategy-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-left: auto;
+    align-items: flex-end;
+}
+
+.strategy-tool-switch {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.strategy-tool-btn {
+    height: 32px;
+    padding: 0 0.9rem;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-main);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.strategy-tool-btn:hover {
+    color: var(--text-main);
+    background: var(--bg-surface-hover);
+}
+
+.strategy-tool-btn.active {
+    background: linear-gradient(135deg, var(--accent-blue), #0284c7);
+    color: #fff;
+    box-shadow: 0 2px 10px var(--accent-blue-glow);
+}
+
+.strategy-tool-options {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    width: 100%;
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.strategy-tool-options[hidden] {
+    display: none;
+}
+
+.strategy-color-input {
+    width: 46px;
+    height: 40px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-dark);
+    padding: 2px;
+    cursor: pointer;
+}
+
+.strategy-text-field {
+    width: 100%;
+    background: var(--bg-dark);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.8rem;
+    font-family: var(--font-main);
+}
+
+.strategy-tool-hint {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    align-self: center;
+    flex: 1 1 200px;
+    min-width: 180px;
+    margin: 0;
+}
+
 .danger-btn:hover {
     background: rgba(239, 68, 68, 0.1);
 }

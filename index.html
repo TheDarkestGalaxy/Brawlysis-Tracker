@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brawlysis – Match Tracker</title>
-    <link rel="stylesheet" href="style.css?v=20260708c">
+    <link rel="stylesheet" href="style.css?v=20260708d">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -235,72 +235,98 @@
                 </div>
 
                 <div class="stat-card" style="align-items: flex-start;">
-                    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; width:100%; margin-bottom:1rem; align-items:end;">
-                        <div class="form-group" style="margin:0; min-width:260px;">
-                            <label for="strategy-map-select">Map</label>
-                            <select id="strategy-map-select"></select>
+                    <div class="strategy-toolbar">
+                        <div class="strategy-toolbar-top">
+                            <div class="form-group" style="margin:0; min-width:240px;">
+                                <label for="strategy-map-select">Map</label>
+                                <select id="strategy-map-select"></select>
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label>Tool</label>
+                                <div class="strategy-tool-switch" id="strategy-tool-switch">
+                                    <button type="button" class="strategy-tool-btn active" data-tool="arrow">Arrow</button>
+                                    <button type="button" class="strategy-tool-btn" data-tool="token">Brawler</button>
+                                    <button type="button" class="strategy-tool-btn" data-tool="text">Text</button>
+                                    <button type="button" class="strategy-tool-btn" data-tool="erase">Erase</button>
+                                </div>
+                            </div>
+                            <div class="strategy-actions">
+                                <button type="button" id="strategy-undo-btn" class="primary-btn strategy-toolbar-btn strategy-btn-muted">Undo</button>
+                                <button type="button" id="strategy-clear-btn" class="danger-btn strategy-toolbar-btn">Clear</button>
+                                <button type="button" id="strategy-save-btn" class="primary-btn strategy-toolbar-btn">Save</button>
+                                <button type="button" id="strategy-export-btn" class="primary-btn strategy-toolbar-btn strategy-btn-export">Export PNG</button>
+                            </div>
                         </div>
-                        <div class="form-group" style="margin:0;">
-                            <label for="strategy-tool-select">Tool</label>
-                            <select id="strategy-tool-select">
-                                <option value="arrow">Arrow</option>
-                                <option value="token">Brawler token</option>
-                                <option value="text">Text</option>
-                                <option value="erase">Erase</option>
-                            </select>
+
+                        <div class="strategy-tool-options" data-tool-options="arrow">
+                            <div class="form-group" style="margin:0;">
+                                <label for="strategy-arrow-style">Arrow style</label>
+                                <select id="strategy-arrow-style" style="min-width:140px;">
+                                    <option value="straight">Straight</option>
+                                    <option value="curved">Curved</option>
+                                    <option value="dashed">Dashed</option>
+                                    <option value="double">Double-headed</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label for="strategy-arrow-width">Line width</label>
+                                <select id="strategy-arrow-width" style="min-width:110px;">
+                                    <option value="thin">Thin</option>
+                                    <option value="med" selected>Medium</option>
+                                    <option value="thick">Thick</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label for="strategy-arrow-color">Color</label>
+                                <input type="color" id="strategy-arrow-color" value="#ff4d4d" class="strategy-color-input">
+                            </div>
                         </div>
-                        <div class="form-group" style="margin:0;">
-                            <label for="strategy-arrow-style">Arrow style</label>
-                            <select id="strategy-arrow-style" style="min-width:130px;">
-                                <option value="straight">Straight</option>
-                                <option value="curved">Curved</option>
-                                <option value="dashed">Dashed</option>
-                                <option value="double">Double-headed</option>
-                            </select>
+
+                        <div class="strategy-tool-options" data-tool-options="token" hidden>
+                            <div class="form-group" style="margin:0; min-width:220px;">
+                                <label for="strategy-token-brawler">Brawler</label>
+                                <select id="strategy-token-brawler" style="width:100%;"></select>
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label for="strategy-token-size">Token size</label>
+                                <select id="strategy-token-size" style="min-width:110px;">
+                                    <option value="sm">Small</option>
+                                    <option value="md" selected>Medium</option>
+                                    <option value="lg">Large</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label for="strategy-token-color">Ring color</label>
+                                <input type="color" id="strategy-token-color" value="#24d6ff" class="strategy-color-input">
+                            </div>
+                            <p class="strategy-tool-hint">Pick a brawler, click the map to place it, then drag tokens to plan positioning.</p>
                         </div>
-                        <div class="form-group" style="margin:0;">
-                            <label for="strategy-arrow-width">Line width</label>
-                            <select id="strategy-arrow-width" style="min-width:100px;">
-                                <option value="thin">Thin</option>
-                                <option value="med" selected>Medium</option>
-                                <option value="thick">Thick</option>
-                            </select>
+
+                        <div class="strategy-tool-options" data-tool-options="text" hidden>
+                            <div class="form-group" style="margin:0; min-width:240px;">
+                                <label for="strategy-text-input">Label text</label>
+                                <input id="strategy-text-input" type="text" placeholder="e.g. pinch mid, hold lane" class="strategy-text-field">
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label for="strategy-text-size-select">Text size</label>
+                                <select id="strategy-text-size-select" style="min-width:120px;">
+                                    <option value="sm">Small</option>
+                                    <option value="md" selected>Medium</option>
+                                    <option value="lg">Large</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label for="strategy-text-color">Color</label>
+                                <input type="color" id="strategy-text-color" value="#ff4d4d" class="strategy-color-input">
+                            </div>
+                            <p class="strategy-tool-hint">Type a label then click the map — or click empty space to type inline. Drag labels to move them.</p>
                         </div>
-                        <div class="form-group" style="margin:0; min-width:190px;">
-                            <label for="strategy-token-brawler">Brawler token</label>
-                            <select id="strategy-token-brawler" style="width:100%;"></select>
+
+                        <div class="strategy-tool-options" data-tool-options="erase" hidden>
+                            <p class="strategy-tool-hint">Click any arrow, label, or brawler token to remove it. Drag across freehand ink to rub it out.</p>
                         </div>
-                        <div class="form-group" style="margin:0;">
-                            <label for="strategy-token-size">Token size</label>
-                            <select id="strategy-token-size" style="min-width:100px;">
-                                <option value="sm">Small</option>
-                                <option value="md" selected>Medium</option>
-                                <option value="lg">Large</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin:0; min-width:220px;">
-                            <label for="strategy-text-input">Label text</label>
-                            <input id="strategy-text-input" type="text" placeholder="e.g. pinch mid, hold lane" style="width:100%; background: var(--bg-dark); color: var(--text-main); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.6rem 0.8rem; font-family: var(--font-main);">
-                        </div>
-                        <div class="form-group" style="margin:0;">
-                            <label for="strategy-text-size-select">Text size</label>
-                            <select id="strategy-text-size-select" style="min-width:110px;">
-                                <option value="sm">Small</option>
-                                <option value="md" selected>Medium</option>
-                                <option value="lg">Large</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin:0;">
-                            <label for="strategy-color">Color</label>
-                            <input type="color" id="strategy-color" value="#ff4d4d" style="width:46px; height:40px; border:none; background:transparent; padding:0;">
-                        </div>
-                        <button type="button" id="strategy-undo-btn" class="primary-btn strategy-toolbar-btn strategy-btn-muted">Undo</button>
-                        <button type="button" id="strategy-clear-btn" class="danger-btn strategy-toolbar-btn">Clear</button>
-                        <button type="button" id="strategy-save-btn" class="primary-btn strategy-toolbar-btn">Save Notes</button>
-                        <button type="button" id="strategy-export-btn" class="primary-btn strategy-toolbar-btn strategy-btn-export">Export PNG</button>
                     </div>
-                    <div id="strategy-save-msg" style="color: var(--color-win); margin-bottom: 0.7rem; display:none;">Saved strategy for this map.</div>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.7rem;">Tip: use the <strong>Brawler token</strong> tool to place a brawler on the map, then drag it to plan positioning and teamwork. Switch <strong>Arrow style</strong> (straight, curved, dashed, double-headed) to show rotations, pushes, and pincers.</p>
+                    <div id="strategy-save-msg" style="color: var(--color-win); margin: 0.2rem 0 0.7rem; display:none;">Saved strategy for this map.</div>
                     <div class="strategy-board-wrap">
                         <img id="strategy-map-image" alt="Map" class="strategy-map-image">
                         <canvas id="strategy-canvas" class="strategy-canvas"></canvas>
@@ -439,6 +465,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260708c"></script>
+    <script src="app.js?v=20260708d"></script>
 </body>
 </html>

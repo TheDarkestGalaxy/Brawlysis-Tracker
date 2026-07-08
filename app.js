@@ -640,6 +640,28 @@ function strategyTokenSize() {
     return STRATEGY_TOKEN_SIZE_MAP[el ? el.value : 'md'] || 46;
 }
 
+/** Color for the active tool (each tool has its own color picker). */
+function strategyToolColor() {
+    const id = strategyTool === 'token' ? 'strategy-token-color'
+        : strategyTool === 'text' ? 'strategy-text-color'
+            : 'strategy-arrow-color';
+    const el = document.getElementById(id);
+    if (el) return el.value;
+    return strategyTool === 'token' ? '#24d6ff' : '#ff4d4d';
+}
+
+/** Switch the active drawing tool and reveal only that tool's option panel. */
+function setStrategyTool(tool) {
+    strategyTool = tool;
+    strategyCloseInlineEditor(true);
+    document.querySelectorAll('.strategy-tool-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tool === tool);
+    });
+    document.querySelectorAll('.strategy-tool-options').forEach(panel => {
+        panel.hidden = panel.dataset.toolOptions !== tool;
+    });
+}
+
 /** Load (and cache) a brawler portrait for canvas tokens; re-composites when it finishes. */
 function strategyGetTokenImage(url) {
     if (!url) return null;
@@ -1341,9 +1363,13 @@ async function init() {
             strategyMapKey = strategyMapSelect.value;
             strategyMapImage.src = strategyMapSelect.selectedOptions[0]?.dataset?.img || '';
         });
-        const toolSel = document.getElementById('strategy-tool-select');
-        if (toolSel) toolSel.addEventListener('change', () => { strategyTool = toolSel.value; });
-        const colorInput = document.getElementById('strategy-color');
+        const toolSwitch = document.getElementById('strategy-tool-switch');
+        if (toolSwitch) {
+            toolSwitch.querySelectorAll('.strategy-tool-btn').forEach(btn => {
+                btn.addEventListener('click', () => setStrategyTool(btn.dataset.tool));
+            });
+        }
+        setStrategyTool(strategyTool);
         const textInput = document.getElementById('strategy-text-input');
         strategyCanvas.addEventListener('mousedown', ev => {
             if (!strategyMapKey) return;
@@ -1367,7 +1393,7 @@ async function init() {
                             x: pt.x,
                             y: pt.y,
                             size: strategyTokenSize(),
-                            color: colorInput ? colorInput.value : '#24d6ff'
+                            color: strategyToolColor()
                         });
                         strategyComposite();
                         strategySave();
@@ -1392,14 +1418,14 @@ async function init() {
                             text: preset,
                             x: pt.x,
                             y: pt.y,
-                            color: colorInput ? colorInput.value : '#ff4d4d',
+                            color: strategyToolColor(),
                             size: strategyCurrentFontSize()
                         });
                         strategyComposite();
                         strategySave();
                         strategyPushUndoSnapshot();
                     } else {
-                        strategyOpenInlineEditor(pt, colorInput ? colorInput.value : '#ff4d4d');
+                        strategyOpenInlineEditor(pt, strategyToolColor());
                     }
                 }
                 return;
@@ -1456,7 +1482,7 @@ async function init() {
             if (!strategyDrawing) return;
             const end = strategyCanvasPoint(ev);
             if (strategyTool === 'arrow' && strategyStart) {
-                strategyDrawArrow(strategyStart, end, colorInput ? colorInput.value : '#ff4d4d', strategyArrowStyle(), strategyArrowWidth());
+                strategyDrawArrow(strategyStart, end, strategyToolColor(), strategyArrowStyle(), strategyArrowWidth());
             }
             strategyDrawing = false;
             strategyStart = null;
