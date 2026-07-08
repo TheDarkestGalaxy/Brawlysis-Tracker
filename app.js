@@ -618,7 +618,57 @@ let strategyEditorEl = null;
 let strategyUndoStack = [];
 let strategyUndoIndex = -1;
 let strategySuspendUndoPush = false;
+let strategyTokens = [];
+let strategyDraggingTokenIndex = -1;
+const strategyTokenImgCache = new Map();
 const STRATEGY_TEXT_SIZE_MAP = { sm: 12, md: 14, lg: 17 };
+const STRATEGY_TOKEN_SIZE_MAP = { sm: 34, md: 46, lg: 62 };
+const STRATEGY_ARROW_WIDTH_MAP = { thin: 3, med: 4, thick: 6 };
+
+function strategyArrowStyle() {
+    const el = document.getElementById('strategy-arrow-style');
+    return el ? el.value : 'straight';
+}
+
+function strategyArrowWidth() {
+    const el = document.getElementById('strategy-arrow-width');
+    return STRATEGY_ARROW_WIDTH_MAP[el ? el.value : 'med'] || 4;
+}
+
+function strategyTokenSize() {
+    const el = document.getElementById('strategy-token-size');
+    return STRATEGY_TOKEN_SIZE_MAP[el ? el.value : 'md'] || 46;
+}
+
+/** Load (and cache) a brawler portrait for canvas tokens; re-composites when it finishes. */
+function strategyGetTokenImage(url) {
+    if (!url) return null;
+    let entry = strategyTokenImgCache.get(url);
+    if (!entry) {
+        entry = { img: new Image(), loaded: false };
+        entry.img.crossOrigin = 'anonymous';
+        entry.img.onload = () => { entry.loaded = true; strategyComposite(); };
+        entry.img.onerror = () => { entry.loaded = false; };
+        entry.img.src = url;
+        strategyTokenImgCache.set(url, entry);
+    }
+    return entry;
+}
+
+function populateStrategyTokenBrawlers() {
+    const sel = document.getElementById('strategy-token-brawler');
+    if (!sel || !brawlers.length) return;
+    const prev = sel.value;
+    sel.innerHTML = '';
+    brawlers.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = String(b.id);
+        opt.textContent = b.name;
+        opt.dataset.icon = b.imageUrl2 || b.imageUrl || brawlifyBrawlerIconUrl(b.id);
+        sel.appendChild(opt);
+    });
+    if (prev) sel.value = prev;
+}
 
 function strategyCurrentFontSize() {
     const sel = document.getElementById('strategy-text-size-select');
@@ -638,12 +688,13 @@ function strategyEnsureInkCanvas() {
 function strategySnapshot() {
     return {
         ink: strategyInkCanvas ? strategyInkCanvas.toDataURL('image/png') : '',
-        labels: JSON.parse(JSON.stringify(strategyLabels || []))
+        labels: JSON.parse(JSON.stringify(strategyLabels || [])),
+        tokens: JSON.parse(JSON.stringify(strategyTokens || []))
     };
 }
 
 function strategyStateSignature(snap) {
-    return `${snap.ink.length}:${JSON.stringify(snap.labels)}`;
+    return `${snap.ink.length}:${JSON.stringify(snap.labels)}:${JSON.stringify(snap.tokens || [])}`;
 }
 
 function strategyPushUndoSnapshot() {
@@ -672,6 +723,7 @@ function strategyApplySnapshot(snap, persist = true) {
     if (!snap || !strategyInkCtx) return;
     strategySuspendUndoPush = true;
     strategyLabels = JSON.parse(JSON.stringify(snap.labels || []));
+    strategyTokens = JSON.parse(JSON.stringify(snap.tokens || []));
     strategyInkCtx.clearRect(0, 0, strategyCanvasSize.width, strategyCanvasSize.height);
     if (snap.ink) {
         const img = new Image();
@@ -729,7 +781,63 @@ function strategyComposite() {
     if (strategyInkCanvas) {
         ctx.drawImage(strategyInkCanvas, 0, 0, width, height);
     }
+    strategyDrawTokens(ctx);
     strategyDrawLabels(ctx);
+}
+
+/** Draw draggable brawler portrait tokens (x/y are the token CENTER). */
+function strategyDrawTokens(ctx) {
+    if (!ctx || !Array.isArray(strategyTokens)) return;
+    strategyTokens.forEach(tk => {
+        if (!tk) return;
+        const size = Number(tk.size) || 46;
+        const r = size / 2;
+        const cx = tk.x, cy = tk.y;
+        ctx.save();
+        // dark backing so transparent portraits stay visible on any map
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(5, 8, 14, 0.92)';
+        ctx.fill();
+
+        const entry = strategyGetTokenImage(tk.iconUrl);
+        if (entry && entry.loaded) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.drawImage(entry.img, cx - r, cy - r, size, size);
+            ctx.restore();
+        } else {
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fillStyle = '#2b3648';
+            ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = `700 ${Math.round(size * 0.32)}px Outfit, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(String(tk.name || '?').slice(0, 3).toUpperCase(), cx, cy);
+        }
+
+        // colored ring
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = tk.color || '#24d6ff';
+        ctx.stroke();
+        ctx.restore();
+    });
+}
+
+function strategyTokenHitTest(pt) {
+    for (let i = strategyTokens.length - 1; i >= 0; i--) {
+        const tk = strategyTokens[i];
+        if (!tk) continue;
+        const r = (Number(tk.size) || 46) / 2;
+        if (Math.hypot(pt.x - tk.x, pt.y - tk.y) <= r + 3) return i;
+    }
+    return -1;
 }
 
 function strategyDrawLabels(ctx) {
@@ -855,6 +963,7 @@ function strategyLoad() {
     const data = localStorage.getItem(strategyStorageKey(strategyMapKey));
     const clearAndComposite = () => {
         strategyLabels = [];
+        strategyTokens = [];
         if (strategyInkCtx) strategyInkCtx.clearRect(0, 0, strategyCanvasSize.width, strategyCanvasSize.height);
         strategyComposite();
     };
@@ -865,17 +974,29 @@ function strategyLoad() {
     }
     let inkDataUrl = '';
     let labels = [];
+    let tokens = [];
     try {
         const parsed = JSON.parse(data);
         if (parsed && typeof parsed === 'object') {
             inkDataUrl = typeof parsed.ink === 'string' ? parsed.ink : '';
             labels = Array.isArray(parsed.labels) ? parsed.labels : [];
+            tokens = Array.isArray(parsed.tokens) ? parsed.tokens : [];
         } else if (typeof parsed === 'string') {
             inkDataUrl = parsed;
         }
     } catch {
         inkDataUrl = data;
     }
+    strategyTokens = tokens.map(t => ({
+        id: String(t.id || (Date.now() + '-' + Math.random().toString(36).slice(2, 7))),
+        brawlerId: String(t.brawlerId || ''),
+        name: String(t.name || ''),
+        iconUrl: String(t.iconUrl || ''),
+        x: Number(t.x) || 40,
+        y: Number(t.y) || 40,
+        size: Number(t.size) || 46,
+        color: String(t.color || '#24d6ff')
+    }));
     strategyLabels = labels.map(l => {
         const rawSize = Number(l.size);
         // Auto-migrate older larger labels to the new compact sizing.
@@ -913,7 +1034,8 @@ function strategySave(showToast = false) {
     if (!strategyCanvas || !strategyMapKey) return;
     const payload = {
         ink: strategyInkCanvas ? strategyInkCanvas.toDataURL('image/png') : '',
-        labels: strategyLabels
+        labels: strategyLabels,
+        tokens: strategyTokens
     };
     localStorage.setItem(strategyStorageKey(strategyMapKey), JSON.stringify(payload));
     if (showToast) {
@@ -925,51 +1047,66 @@ function strategySave(showToast = false) {
     }
 }
 
-function strategyDrawArrow(from, to, color) {
+function strategyDrawArrow(from, to, color, style, width) {
     if (!strategyInkCtx) return;
     const ctx = strategyInkCtx;
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const len = Math.hypot(dx, dy);
     if (len < 8) return;
-    const head = Math.max(10, Math.min(18, len * 0.18));
-    const ang = Math.atan2(dy, dx);
-    const tip = { x: to.x, y: to.y };
-    const end = { x: tip.x - head * Math.cos(ang), y: tip.y - head * Math.sin(ang) };
+
+    style = style || 'straight';
+    const w = width || 4;
+    const dashed = style === 'dashed';
+    const curved = style === 'curved';
+    const doubleHead = style === 'double';
+    const head = Math.max(11, Math.min(22, len * 0.2));
+
+    // Curve control point offset perpendicular to the shaft.
+    const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
+    const px = -dy / len, py = dx / len;
+    const off = curved ? Math.min(80, len * 0.3) : 0;
+    const ctrl = { x: mx + px * off, y: my + py * off };
+    const angTip = curved ? Math.atan2(to.y - ctrl.y, to.x - ctrl.x) : Math.atan2(dy, dx);
+    const angStart = curved ? Math.atan2(ctrl.y - from.y, ctrl.x - from.x) : Math.atan2(dy, dx);
+
+    const drawShaft = (strokeStyle, lw) => {
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = lw;
+        ctx.setLineDash(dashed ? [Math.max(9, lw * 2.2), Math.max(7, lw * 1.8)] : []);
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        if (curved) ctx.quadraticCurveTo(ctrl.x, ctrl.y, to.x, to.y);
+        else ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    };
+    const drawHead = (cx, cy, a, fillStyle, scale) => {
+        const h = head * (scale || 1);
+        const p1 = { x: cx - h * Math.cos(a - Math.PI / 6), y: cy - h * Math.sin(a - Math.PI / 6) };
+        const p2 = { x: cx - h * Math.cos(a + Math.PI / 6), y: cy - h * Math.sin(a + Math.PI / 6) };
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.closePath();
+        ctx.fillStyle = fillStyle;
+        ctx.fill();
+    };
+
     ctx.save();
-    // outline under-stroke for contrast
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-    ctx.lineWidth = 7;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
-    // main stroke
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
-    // arrow head with outline
-    const p1 = { x: tip.x - head * Math.cos(ang - Math.PI / 6), y: tip.y - head * Math.sin(ang - Math.PI / 6) };
-    const p2 = { x: tip.x - head * Math.cos(ang + Math.PI / 6), y: tip.y - head * Math.sin(ang + Math.PI / 6) };
-    ctx.beginPath();
-    ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
+    // contrast under-stroke, then colored shaft
+    drawShaft('rgba(0,0,0,0.45)', w + 3);
+    drawShaft(color, w);
+    // arrow head(s) with outline for contrast
+    drawHead(to.x, to.y, angTip, 'rgba(0,0,0,0.45)', 1.18);
+    drawHead(to.x, to.y, angTip, color, 1);
+    if (doubleHead) {
+        drawHead(from.x, from.y, angStart + Math.PI, 'rgba(0,0,0,0.45)', 1.18);
+        drawHead(from.x, from.y, angStart + Math.PI, color, 1);
+    }
     ctx.restore();
 }
 
@@ -1184,6 +1321,33 @@ async function init() {
             if (!strategyMapKey) return;
             strategyCloseInlineEditor(true);
             const pt = strategyCanvasPoint(ev);
+            if (strategyTool === 'token') {
+                const tHit = strategyTokenHitTest(pt);
+                if (tHit >= 0) {
+                    strategyDraggingTokenIndex = tHit;
+                    strategyDragOffset = { x: pt.x - strategyTokens[tHit].x, y: pt.y - strategyTokens[tHit].y };
+                    strategyDrawing = true;
+                } else {
+                    const sel = document.getElementById('strategy-token-brawler');
+                    const opt = sel && sel.selectedOptions[0];
+                    if (opt && opt.value) {
+                        strategyTokens.push({
+                            id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                            brawlerId: opt.value,
+                            name: opt.textContent,
+                            iconUrl: opt.dataset.icon || '',
+                            x: pt.x,
+                            y: pt.y,
+                            size: strategyTokenSize(),
+                            color: colorInput ? colorInput.value : '#24d6ff'
+                        });
+                        strategyComposite();
+                        strategySave();
+                        strategyPushUndoSnapshot();
+                    }
+                }
+                return;
+            }
             if (strategyTool === 'text') {
                 const hitIdx = strategyLabelHitTest(pt);
                 if (hitIdx >= 0) {
@@ -1213,6 +1377,14 @@ async function init() {
                 return;
             }
             if (strategyTool === 'erase') {
+                const tHit = strategyTokenHitTest(pt);
+                if (tHit >= 0) {
+                    strategyTokens.splice(tHit, 1);
+                    strategyComposite();
+                    strategySave();
+                    strategyPushUndoSnapshot();
+                    return;
+                }
                 const hitIdx = strategyLabelHitTest(pt);
                 if (hitIdx >= 0) {
                     strategyLabels.splice(hitIdx, 1);
@@ -1228,6 +1400,13 @@ async function init() {
         });
         strategyCanvas.addEventListener('mousemove', ev => {
             const pt = strategyCanvasPoint(ev);
+            if (strategyTool === 'token' && strategyDrawing && strategyDraggingTokenIndex >= 0) {
+                const tk = strategyTokens[strategyDraggingTokenIndex];
+                tk.x = pt.x - strategyDragOffset.x;
+                tk.y = pt.y - strategyDragOffset.y;
+                strategyComposite();
+                return;
+            }
             if (strategyTool === 'text' && strategyDrawing && strategyDraggingLabelIndex >= 0) {
                 const lbl = strategyLabels[strategyDraggingLabelIndex];
                 lbl.x = pt.x - strategyDragOffset.x;
@@ -1249,11 +1428,12 @@ async function init() {
             if (!strategyDrawing) return;
             const end = strategyCanvasPoint(ev);
             if (strategyTool === 'arrow' && strategyStart) {
-                strategyDrawArrow(strategyStart, end, colorInput ? colorInput.value : '#ff4d4d');
+                strategyDrawArrow(strategyStart, end, colorInput ? colorInput.value : '#ff4d4d', strategyArrowStyle(), strategyArrowWidth());
             }
             strategyDrawing = false;
             strategyStart = null;
             strategyDraggingLabelIndex = -1;
+            strategyDraggingTokenIndex = -1;
             strategyDragOffset = { x: 0, y: 0 };
             strategyComposite();
             strategySave();
@@ -1267,6 +1447,7 @@ async function init() {
             strategyDrawing = false;
             strategyStart = null;
             strategyDraggingLabelIndex = -1;
+            strategyDraggingTokenIndex = -1;
             strategyDragOffset = { x: 0, y: 0 };
         });
         const clearBtn = document.getElementById('strategy-clear-btn');
@@ -1275,6 +1456,7 @@ async function init() {
             strategyCloseInlineEditor(false);
             strategyInkCtx.clearRect(0, 0, strategyCanvasSize.width, strategyCanvasSize.height);
             strategyLabels = [];
+            strategyTokens = [];
             strategyComposite();
             strategySave(true);
             strategyPushUndoSnapshot();
@@ -1328,6 +1510,7 @@ navLinks.forEach(link => {
         if (targetView === 'strategies') {
             strategyResizeCanvas();
             strategyLoad();
+            populateStrategyTokenBrawlers();
         }
         if (targetView === 'guide') {
             initGuideStrategy();
@@ -1594,6 +1777,7 @@ async function fetchBrawlersOnce() {
                     brawlerSearch.disabled = false;
                 }
                 renderBrawlerOptions(brawlers);
+                populateStrategyTokenBrawlers();
                 if (isGuideViewActive() && guideActiveTab === 'tierlists') {
                     renderGuideBrawlerPool();
                 }

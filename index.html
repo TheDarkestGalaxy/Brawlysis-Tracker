@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brawlysis – Match Tracker</title>
-    <link rel="stylesheet" href="style.css?v=20260707b">
+    <link rel="stylesheet" href="style.css?v=20260708a">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -244,8 +244,38 @@
                             <label for="strategy-tool-select">Tool</label>
                             <select id="strategy-tool-select">
                                 <option value="arrow">Arrow</option>
+                                <option value="token">Brawler token</option>
                                 <option value="text">Text</option>
                                 <option value="erase">Erase</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label for="strategy-arrow-style">Arrow style</label>
+                            <select id="strategy-arrow-style" style="min-width:130px;">
+                                <option value="straight">Straight</option>
+                                <option value="curved">Curved</option>
+                                <option value="dashed">Dashed</option>
+                                <option value="double">Double-headed</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label for="strategy-arrow-width">Line width</label>
+                            <select id="strategy-arrow-width" style="min-width:100px;">
+                                <option value="thin">Thin</option>
+                                <option value="med" selected>Medium</option>
+                                <option value="thick">Thick</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin:0; min-width:190px;">
+                            <label for="strategy-token-brawler">Brawler token</label>
+                            <select id="strategy-token-brawler" style="width:100%;"></select>
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label for="strategy-token-size">Token size</label>
+                            <select id="strategy-token-size" style="min-width:100px;">
+                                <option value="sm">Small</option>
+                                <option value="md" selected>Medium</option>
+                                <option value="lg">Large</option>
                             </select>
                         </div>
                         <div class="form-group" style="margin:0; min-width:220px;">
@@ -270,6 +300,7 @@
                         <button type="button" id="strategy-export-btn" class="primary-btn strategy-toolbar-btn strategy-btn-export">Export PNG</button>
                     </div>
                     <div id="strategy-save-msg" style="color: var(--color-win); margin-bottom: 0.7rem; display:none;">Saved strategy for this map.</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.7rem;">Tip: use the <strong>Brawler token</strong> tool to place a brawler on the map, then drag it to plan positioning and teamwork. Switch <strong>Arrow style</strong> (straight, curved, dashed, double-headed) to show rotations, pushes, and pincers.</p>
                     <div class="strategy-board-wrap">
                         <img id="strategy-map-image" alt="Map" class="strategy-map-image">
                         <canvas id="strategy-canvas" class="strategy-canvas"></canvas>
@@ -408,6 +439,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260707b"></script>
+    <script src="app.js?v=20260708a"></script>
 </body>
 </html>
