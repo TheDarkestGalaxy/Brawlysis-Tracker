@@ -1060,37 +1060,52 @@ function strategyDrawArrow(from, to, color, style, width) {
     const dashed = style === 'dashed';
     const curved = style === 'curved';
     const doubleHead = style === 'double';
-    const head = Math.max(11, Math.min(22, len * 0.2));
+    // Head scales a little with line width so thick arrows don't look pin-headed.
+    const headLen = Math.max(14, Math.min(30, len * 0.24 + w * 2));
+    const spread = Math.PI / 7; // half-angle of the arrow head (narrow = sleeker)
 
     // Curve control point offset perpendicular to the shaft.
     const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
     const px = -dy / len, py = dx / len;
     const off = curved ? Math.min(80, len * 0.3) : 0;
     const ctrl = { x: mx + px * off, y: my + py * off };
+
+    // Direction the line is travelling as it arrives at each tip.
     const angTip = curved ? Math.atan2(to.y - ctrl.y, to.x - ctrl.x) : Math.atan2(dy, dx);
     const angStart = curved ? Math.atan2(ctrl.y - from.y, ctrl.x - from.x) : Math.atan2(dy, dx);
+
+    // Pull the shaft back so the solid triangle head sits flush over the line
+    // instead of the round line-cap poking past the point.
+    const back = headLen * 0.85;
+    const shaftEnd = { x: to.x - Math.cos(angTip) * back, y: to.y - Math.sin(angTip) * back };
+    const shaftStart = doubleHead
+        ? { x: from.x + Math.cos(angStart) * back, y: from.y + Math.sin(angStart) * back }
+        : { x: from.x, y: from.y };
 
     const drawShaft = (strokeStyle, lw) => {
         ctx.strokeStyle = strokeStyle;
         ctx.lineWidth = lw;
-        ctx.setLineDash(dashed ? [Math.max(9, lw * 2.2), Math.max(7, lw * 1.8)] : []);
+        ctx.setLineDash(dashed ? [Math.max(10, lw * 2.4), Math.max(8, lw * 1.9)] : []);
         ctx.beginPath();
-        ctx.moveTo(from.x, from.y);
-        if (curved) ctx.quadraticCurveTo(ctrl.x, ctrl.y, to.x, to.y);
-        else ctx.lineTo(to.x, to.y);
+        ctx.moveTo(shaftStart.x, shaftStart.y);
+        if (curved) ctx.quadraticCurveTo(ctrl.x, ctrl.y, shaftEnd.x, shaftEnd.y);
+        else ctx.lineTo(shaftEnd.x, shaftEnd.y);
         ctx.stroke();
         ctx.setLineDash([]);
     };
-    const drawHead = (cx, cy, a, fillStyle, scale) => {
-        const h = head * (scale || 1);
-        const p1 = { x: cx - h * Math.cos(a - Math.PI / 6), y: cy - h * Math.sin(a - Math.PI / 6) };
-        const p2 = { x: cx - h * Math.cos(a + Math.PI / 6), y: cy - h * Math.sin(a + Math.PI / 6) };
+    // Triangle head with apex exactly on the point; stroke gives a clean border.
+    const drawHead = (tx, ty, a) => {
+        const p1 = { x: tx - headLen * Math.cos(a - spread), y: ty - headLen * Math.sin(a - spread) };
+        const p2 = { x: tx - headLen * Math.cos(a + spread), y: ty - headLen * Math.sin(a + spread) };
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
+        ctx.moveTo(tx, ty);
         ctx.lineTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
         ctx.closePath();
-        ctx.fillStyle = fillStyle;
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.fillStyle = color;
         ctx.fill();
     };
 
@@ -1098,15 +1113,11 @@ function strategyDrawArrow(from, to, color, style, width) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     // contrast under-stroke, then colored shaft
-    drawShaft('rgba(0,0,0,0.45)', w + 3);
+    drawShaft('rgba(0,0,0,0.5)', w + 3);
     drawShaft(color, w);
-    // arrow head(s) with outline for contrast
-    drawHead(to.x, to.y, angTip, 'rgba(0,0,0,0.45)', 1.18);
-    drawHead(to.x, to.y, angTip, color, 1);
-    if (doubleHead) {
-        drawHead(from.x, from.y, angStart + Math.PI, 'rgba(0,0,0,0.45)', 1.18);
-        drawHead(from.x, from.y, angStart + Math.PI, color, 1);
-    }
+    // arrow head(s)
+    drawHead(to.x, to.y, angTip);
+    if (doubleHead) drawHead(from.x, from.y, angStart + Math.PI);
     ctx.restore();
 }
 
