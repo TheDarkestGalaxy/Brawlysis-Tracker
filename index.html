@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brawlysis – Match Tracker</title>
-    <link rel="stylesheet" href="style.css?v=20260709a">
+    <link rel="stylesheet" href="style.css?v=20260709b">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -19,6 +19,7 @@
                 <li data-view="matches">Match History</li>
                 <li data-view="analytics">Match Analytics</li>
                 <li data-view="season">Season Progress</li>
+                <li data-view="playtime">Playtime</li>
                 <li data-view="collection">Collection</li>
                 <li data-view="strategies">Map Strategies</li>
                 <li data-view="guide">General Strategy</li>
@@ -211,6 +212,44 @@
                             <tbody id="season-table-body"></tbody>
                         </table>
                     </div>
+                </div>
+            </section>
+
+            <!-- Playtime View -->
+            <section id="playtime" class="view">
+                <div class="header-with-actions">
+                    <h2>Daily Playtime</h2>
+                </div>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.9rem; max-width: 640px;">
+                    Actual in-game time per day, summed from the length of every synced battle. Lobby and queue waiting time is not counted &mdash; only the minutes spent inside matches.
+                </p>
+
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem;">
+                    <div class="stat-card">
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">Today</span>
+                        <span id="playtime-today" style="font-size: 2rem; font-weight: 700;">0m</span>
+                    </div>
+                    <div class="stat-card">
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">Last 7 days</span>
+                        <span id="playtime-week" style="font-size: 2rem; font-weight: 700;">0m</span>
+                    </div>
+                    <div class="stat-card">
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">Total tracked</span>
+                        <span id="playtime-total" style="font-size: 2rem; font-weight: 700;">0m</span>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <h3 style="margin-bottom: 1rem;">Daily breakdown</h3>
+                    <div style="overflow-x:auto;">
+                        <table class="season-table" id="playtime-table">
+                            <thead>
+                                <tr><th>Date</th><th>Matches</th><th>Game time</th></tr>
+                            </thead>
+                            <tbody id="playtime-table-body"></tbody>
+                        </table>
+                    </div>
+                    <p id="playtime-empty" class="empty-state" style="display:none; text-align:center; margin-top:1rem;">No playtime tracked yet. Sync your battles to start recording game time.</p>
                 </div>
             </section>
 
@@ -465,6 +504,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260709a"></script>
+    <script src="app.js?v=20260709b"></script>
 </body>
 </html>

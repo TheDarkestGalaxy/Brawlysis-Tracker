@@ -1561,6 +1561,7 @@ navLinks.forEach(link => {
         });
         if (targetView === 'analytics') updateAnalyticsData();
         if (targetView === 'season') renderSeasonProgress();
+        if (targetView === 'playtime') renderPlaytime();
         if (targetView === 'strategies') {
             strategyResizeCanvas();
             strategyLoad();
@@ -2498,6 +2499,9 @@ async function syncBattlelog() {
             const matchId = occurrence === 1 ? battleTimeId : `${battleTimeId}#${occurrence}`;
 
             const trophyChange = item.battle.trophyChange ?? null;
+            // Actual in-game match length in seconds (excludes lobby/queue time). Not all
+            // modes report it; store null when absent so it simply isn't counted.
+            const durationSec = Number.isFinite(Number(item.battle.duration)) ? Number(item.battle.duration) : null;
             const canonMapName = canonicalMapName(mapRaw);
             // Single source of truth: classify from the same fields we store.
             const isRanked = classifyApiStoredMatch({ battleType, trophyChange, modeName: modeLabel, mapName: canonMapName });
@@ -2515,6 +2519,7 @@ async function syncBattlelog() {
                 isRanked,
                 battleType,
                 trophyChange,
+                durationSec,
                 date: battleDate,
                 opponentBrawlers: oppBrawlers
             };
@@ -2550,6 +2555,10 @@ async function syncBattlelog() {
                 }
                 if (oldMatch.mapName !== canonMapName) {
                     oldMatch.mapName = canonMapName;
+                    repaired = true;
+                }
+                if (durationSec !== null && oldMatch.durationSec == null) {
+                    oldMatch.durationSec = durationSec;
                     repaired = true;
                 }
                 if (repaired) updatedCount++;
@@ -2631,6 +2640,8 @@ async function handleCheckIP() {
 function updateDashboard() {
     const seasonView = document.getElementById('season');
     if (seasonView && seasonView.classList.contains('active')) renderSeasonProgress();
+    const playtimeView = document.getElementById('playtime');
+    if (playtimeView && playtimeView.classList.contains('active')) renderPlaytime();
 
     // Filter for only ranked matches for analytics
     const rankedMatches = matches.filter(isRankedMatch);
@@ -3093,6 +3104,83 @@ function renderSeasonProgress() {
 window.addEventListener('resize', () => {
     const view = document.getElementById('season');
     if (view && view.classList.contains('active')) renderSeasonProgress();
+});
+
+/** Human-readable game time, e.g. "1h 23m 45s". Always shows at least seconds. */
+function formatPlaytime(totalSec) {
+    totalSec = Math.max(0, Math.round(totalSec || 0));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const parts = [];
+    if (h) parts.push(`${h}h`);
+    if (m) parts.push(`${m}m`);
+    if (s || (!h && !m)) parts.push(`${s}s`);
+    return parts.join(' ');
+}
+
+function playtimeDayKey(ms) {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Group matches by local calendar day, summing actual in-match seconds. */
+function computeDailyPlaytime() {
+    const byDay = new Map();
+    matches.forEach(m => {
+        const sec = Number(m.durationSec);
+        if (!Number.isFinite(sec) || sec <= 0) return;
+        const ms = matchChronoKey(m);
+        if (!ms) return;
+        const key = playtimeDayKey(ms);
+        const entry = byDay.get(key) || { key, sec: 0, matches: 0, ms };
+        entry.sec += sec;
+        entry.matches += 1;
+        entry.ms = Math.max(entry.ms, ms);
+        byDay.set(key, entry);
+    });
+    return Array.from(byDay.values()).sort((a, b) => b.ms - a.ms);
+}
+
+function renderPlaytime() {
+    const days = computeDailyPlaytime();
+    const tbody = document.getElementById('playtime-table-body');
+    const empty = document.getElementById('playtime-empty');
+    const table = document.getElementById('playtime-table');
+
+    const now = new Date();
+    const todayKey = playtimeDayKey(now.getTime());
+    const todayEntry = days.find(d => d.key === todayKey);
+    const weekCutoff = now.getTime() - 7 * 24 * 3600 * 1000;
+    const weekSec = days.filter(d => d.ms >= weekCutoff).reduce((s, d) => s + d.sec, 0);
+    const totalSec = days.reduce((s, d) => s + d.sec, 0);
+
+    const todayEl = document.getElementById('playtime-today');
+    const weekEl = document.getElementById('playtime-week');
+    const totalEl = document.getElementById('playtime-total');
+    if (todayEl) todayEl.textContent = formatPlaytime(todayEntry ? todayEntry.sec : 0);
+    if (weekEl) weekEl.textContent = formatPlaytime(weekSec);
+    if (totalEl) totalEl.textContent = formatPlaytime(totalSec);
+
+    if (empty) empty.style.display = days.length ? 'none' : 'block';
+    if (table) table.style.display = days.length ? '' : 'none';
+    if (tbody) {
+        tbody.innerHTML = days.map(d => {
+            const label = d.key === todayKey
+                ? 'Today'
+                : new Date(d.ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+            return `<tr>
+                    <td>${label}</td>
+                    <td>${d.matches}</td>
+                    <td><strong>${formatPlaytime(d.sec)}</strong></td>
+                </tr>`;
+        }).join('');
+    }
+}
+
+window.addEventListener('resize', () => {
+    const view = document.getElementById('playtime');
+    if (view && view.classList.contains('active')) renderPlaytime();
 });
 
 // Render Collection Grid
