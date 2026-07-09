@@ -662,6 +662,12 @@ function setStrategyTool(tool) {
     });
 }
 
+// Delegated so tool buttons work regardless of when the toolbar is rendered.
+document.addEventListener('click', ev => {
+    const btn = ev.target.closest && ev.target.closest('.strategy-tool-btn');
+    if (btn && btn.dataset.tool) setStrategyTool(btn.dataset.tool);
+});
+
 /** Load (and cache) a brawler portrait for canvas tokens; re-composites when it finishes. */
 function strategyGetTokenImage(url) {
     if (!url) return null;
@@ -1363,12 +1369,6 @@ async function init() {
             strategyMapKey = strategyMapSelect.value;
             strategyMapImage.src = strategyMapSelect.selectedOptions[0]?.dataset?.img || '';
         });
-        const toolSwitch = document.getElementById('strategy-tool-switch');
-        if (toolSwitch) {
-            toolSwitch.querySelectorAll('.strategy-tool-btn').forEach(btn => {
-                btn.addEventListener('click', () => setStrategyTool(btn.dataset.tool));
-            });
-        }
         setStrategyTool(strategyTool);
         const textInput = document.getElementById('strategy-text-input');
         strategyCanvas.addEventListener('mousedown', ev => {
@@ -2178,15 +2178,13 @@ function renderMatches() {
     visibleMatches.forEach((match) => {
         const item = document.createElement('div');
         item.className = 'match-item';
-        
-        const dateStr = new Date(match.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' });
 
         item.innerHTML = `
             <div class="match-item-left">
                 <img src="${match.brawlerIcon || 'https://via.placeholder.com/40'}" alt="${match.brawlerName}" class="brawler-avatar" onerror="this.src='https://via.placeholder.com/40'">
                 <div class="match-item-details">
                     <h4>${match.brawlerName}</h4>
-                    <p>${match.modeName} - ${match.mapName} • ${dateStr}</p>
+                    <p>${match.modeName} - ${match.mapName}</p>
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 1rem;">
