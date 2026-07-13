@@ -3133,10 +3133,12 @@ function computeDailyPlaytime() {
         const ms = matchChronoKey(m);
         if (!ms) return;
         const key = playtimeDayKey(ms);
-        const entry = byDay.get(key) || { key, sec: 0, matches: 0, ms };
+        const entry = byDay.get(key) || { key, sec: 0, matches: 0, ms, firstMs: ms, lastMs: ms };
         entry.sec += sec;
         entry.matches += 1;
-        entry.ms = Math.max(entry.ms, ms);
+        entry.firstMs = Math.min(entry.firstMs, ms);
+        entry.lastMs = Math.max(entry.lastMs, ms);
+        entry.ms = entry.lastMs;
         byDay.set(key, entry);
     });
     return Array.from(byDay.values()).sort((a, b) => b.ms - a.ms);
@@ -3165,14 +3167,19 @@ function renderPlaytime() {
     if (empty) empty.style.display = days.length ? 'none' : 'block';
     if (table) table.style.display = days.length ? '' : 'none';
     if (tbody) {
+        const timeFmt = { hour: '2-digit', minute: '2-digit' };
         tbody.innerHTML = days.map(d => {
             const label = d.key === todayKey
                 ? 'Today'
                 : new Date(d.ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+            const firstStr = new Date(d.firstMs).toLocaleTimeString(undefined, timeFmt);
+            const lastStr = new Date(d.lastMs).toLocaleTimeString(undefined, timeFmt);
             return `<tr>
                     <td>${label}</td>
                     <td>${d.matches}</td>
                     <td><strong>${formatPlaytime(d.sec)}</strong></td>
+                    <td>${firstStr}</td>
+                    <td>${lastStr}</td>
                 </tr>`;
         }).join('');
     }
@@ -3182,6 +3189,19 @@ window.addEventListener('resize', () => {
     const view = document.getElementById('playtime');
     if (view && view.classList.contains('active')) renderPlaytime();
 });
+
+/** Console diagnostic: run playtimeReport() to see which matches carry duration data. */
+window.playtimeReport = function () {
+    const withDur = matches.filter(m => Number.isFinite(Number(m.durationSec)) && Number(m.durationSec) > 0);
+    const without = matches.filter(m => !(Number.isFinite(Number(m.durationSec)) && Number(m.durationSec) > 0));
+    console.log(`[Playtime] ${matches.length} total matches, ${withDur.length} with game time, ${without.length} without.`);
+    console.log('[Playtime] Most recent 5 matches:');
+    matches.slice().sort(compareMatchesNewestFirst).slice(0, 5).forEach(m => {
+        console.log(`  ${new Date(matchChronoKey(m)).toLocaleString()} | ${m.modeName} - ${m.mapName} | durationSec=${m.durationSec ?? 'none'}`);
+    });
+    console.table(computeDailyPlaytime().map(d => ({ day: d.key, matches: d.matches, gameTime: formatPlaytime(d.sec) })));
+    return { total: matches.length, withDuration: withDur.length, withoutDuration: without.length };
+};
 
 // Render Collection Grid
 function renderCollection(brawlersData) {
